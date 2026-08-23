@@ -50,10 +50,6 @@ export function getLoginUrl() {
 export const api = {
   getMe: () => request('/me'),
 
-  // Guest types (org-level)
-  export const api = {
-  getMe: () => request('/me'),
-
   // Events (my org's)
   listEvents: () => request('/events'),
 
