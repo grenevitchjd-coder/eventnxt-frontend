@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 
 export default function EventWorkspaceTab({ onToast }) {
+  const [events, setEvents] = useState(null)
   const [eventId, setEventId] = useState(() => sessionStorage.getItem('eventnxt_last_event_id') || '')
   const [loadedEventId, setLoadedEventId] = useState(null)
 
@@ -22,6 +23,8 @@ export default function EventWorkspaceTab({ onToast }) {
   const [creatingGuest, setCreatingGuest] = useState(false)
 
   const loadEventData = (id) => {
+    setCategories(null)
+    setGuests(null)
     Promise.all([api.listSeatingCategories(id), api.listGuests(id), api.listGuestTypes()])
       .then(([cats, gsts, types]) => {
         setCategories(cats)
@@ -34,15 +37,25 @@ export default function EventWorkspaceTab({ onToast }) {
   }
 
   useEffect(() => {
-    if (eventId) loadEventData(eventId)
+    api
+      .listEvents()
+      .then((evs) => {
+        setEvents(evs)
+        // Restore the last-selected event if it still exists, else default
+        // to the first one in the list.
+        const restored = evs.find((e) => e.id === eventId)
+        const initial = restored ? restored.id : evs[0]?.id || ''
+        setEventId(initial)
+        if (initial) loadEventData(initial)
+      })
+      .catch((e) => onToast(e.message, true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleLoadEvent = (e) => {
-    e.preventDefault()
-    setCategories(null)
-    setGuests(null)
-    loadEventData(eventId)
+  const handleSelectEvent = (e) => {
+    const id = e.target.value
+    setEventId(id)
+    if (id) loadEventData(id)
   }
 
   const handleCreateCategory = async (e) => {
@@ -96,27 +109,33 @@ export default function EventWorkspaceTab({ onToast }) {
   return (
     <>
       <div className="page-title">Event workspace</div>
-      <p className="page-subtitle">
-        Paste an event ID (from your Events360 org dashboard) to manage its seating and guests.
-      </p>
+      <p className="page-subtitle">Pick an event from your org to manage its seating and guests.</p>
 
-      <div className="panel">
-        <form className="inline-form" onSubmit={handleLoadEvent}>
-          <div className="field" style={{ flex: 1 }}>
-            <label htmlFor="event-id">Event ID</label>
-            <input
-              id="event-id"
-              required
+      {events === null ? null : events.length === 0 ? (
+        <div className="data-table">
+          <div className="empty-state">
+            No events yet — create one in Events360's org dashboard first, then come back here.
+          </div>
+        </div>
+      ) : (
+        <div className="panel">
+          <div className="field">
+            <label htmlFor="event-picker">Event</label>
+            <select
+              id="event-picker"
               style={{ width: '100%', minWidth: 280 }}
               value={eventId}
-              onChange={(e) => setEventId(e.target.value)}
-            />
+              onChange={handleSelectEvent}
+            >
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <button className="btn btn-secondary" type="submit">
-            Load
-          </button>
-        </form>
-      </div>
+        </div>
+      )}
 
       {loadedEventId && categories !== null && guests !== null && (
         <>

@@ -51,6 +51,13 @@ export const api = {
   getMe: () => request('/me'),
 
   // Guest types (org-level)
+  export const api = {
+  getMe: () => request('/me'),
+
+  // Events (my org's)
+  listEvents: () => request('/events'),
+
+  // Guest types (org-level)
   listGuestTypes: () => request('/guest-types'),
   createGuestType: (payload) => request('/guest-types', { method: 'POST', body: JSON.stringify(payload) }),
 
