@@ -21,6 +21,15 @@ function formatDateTime(value) {
   })
 }
 
+function formatTimeOfDay(value) {
+  // value is "HH:MM:SS" from the backend — build a throwaway Date just to
+  // reuse locale-aware time formatting.
+  const [hours, minutes] = value.split(':')
+  const d = new Date()
+  d.setHours(Number(hours), Number(minutes))
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
 export default function HomeTab({ onToast }) {
   const [events, setEvents] = useState(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
@@ -37,7 +46,7 @@ export default function HomeTab({ onToast }) {
   const [addingLink, setAddingLink] = useState(false)
 
   const [schedule, setSchedule] = useState([])
-  const [scheduleForm, setScheduleForm] = useState({ label: '', event_datetime: '' })
+  const [scheduleForm, setScheduleForm] = useState({ label: '', is_recurring: false, event_datetime: '', time_of_day: '' })
   const [addingScheduleItem, setAddingScheduleItem] = useState(false)
 
   const [gallery, setGallery] = useState([])
@@ -187,7 +196,11 @@ export default function HomeTab({ onToast }) {
 
   const handleAddScheduleItem = async (e) => {
     e.preventDefault()
-    if (!scheduleForm.event_datetime) {
+    if (scheduleForm.is_recurring && !scheduleForm.time_of_day) {
+      onToast('Pick a time for this daily item.', true)
+      return
+    }
+    if (!scheduleForm.is_recurring && !scheduleForm.event_datetime) {
       onToast('Pick a date and time for this schedule item.', true)
       return
     }
@@ -195,12 +208,15 @@ export default function HomeTab({ onToast }) {
     try {
       const created = await api.createScheduleItem(selectedEvent.id, {
         label: scheduleForm.label,
-        event_datetime: new Date(scheduleForm.event_datetime).toISOString(),
+        is_recurring: scheduleForm.is_recurring,
+        event_datetime: scheduleForm.is_recurring
+          ? null
+          : new Date(scheduleForm.event_datetime).toISOString(),
+        time_of_day: scheduleForm.is_recurring ? `${scheduleForm.time_of_day}:00` : null,
         sort_order: schedule.length,
       })
-      const next = [...schedule, created].sort((a, b) => new Date(a.event_datetime) - new Date(b.event_datetime))
-      setSchedule(next)
-      setScheduleForm({ label: '', event_datetime: '' })
+      setSchedule([...schedule, created])
+      setScheduleForm({ label: '', is_recurring: scheduleForm.is_recurring, event_datetime: '', time_of_day: '' })
       onToast(`"${created.label}" added`)
     } catch (err) {
       onToast(err.message, true)
@@ -531,7 +547,10 @@ export default function HomeTab({ onToast }) {
                       }}
                     >
                       <span>
-                        <strong>{item.label}</strong> — {formatDateTime(item.event_datetime)}
+                        <strong>{item.label}</strong> —{' '}
+                        {item.is_recurring
+                          ? `Every day at ${formatTimeOfDay(item.time_of_day)}`
+                          : formatDateTime(item.event_datetime)}
                       </span>
                       <button className="btn btn-danger btn-sm" onClick={() => handleDeleteScheduleItem(item)}>
                         Remove
@@ -552,19 +571,49 @@ export default function HomeTab({ onToast }) {
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="sched-time">Date &amp; time</label>
-                  <input
-                    id="sched-time"
-                    type="datetime-local"
-                    required
-                    value={scheduleForm.event_datetime}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, event_datetime: e.target.value })}
-                  />
+                  <label htmlFor="sched-mode">When</label>
+                  <select
+                    id="sched-mode"
+                    style={inputStyle}
+                    value={scheduleForm.is_recurring ? 'daily' : 'once'}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, is_recurring: e.target.value === 'daily' })}
+                  >
+                    <option value="once">One specific date</option>
+                    <option value="daily">Every day of the event</option>
+                  </select>
                 </div>
+                {scheduleForm.is_recurring ? (
+                  <div className="field">
+                    <label htmlFor="sched-time-of-day">Time</label>
+                    <input
+                      id="sched-time-of-day"
+                      type="time"
+                      required
+                      value={scheduleForm.time_of_day}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, time_of_day: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <div className="field">
+                    <label htmlFor="sched-time">Date &amp; time</label>
+                    <input
+                      id="sched-time"
+                      type="datetime-local"
+                      required
+                      value={scheduleForm.event_datetime}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, event_datetime: e.target.value })}
+                    />
+                  </div>
+                )}
                 <button className="btn btn-secondary" type="submit" disabled={addingScheduleItem}>
                   Add
                 </button>
               </form>
+              {scheduleForm.is_recurring && (
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 10 }}>
+                  This will apply automatically to every day of the event — no need to re-enter it per night.
+                </p>
+              )}
             </>
           )}
         </div>
