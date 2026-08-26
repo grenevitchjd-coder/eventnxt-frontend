@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import AuthComplete from './pages/AuthComplete'
 import Dashboard from './pages/Dashboard'
+import PublicEventPage from './pages/PublicEventPage'
 import { isAuthenticated } from './api'
 
 function RequireAuth({ children }) {
@@ -15,6 +16,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/auth/complete" element={<AuthComplete />} />
+        {/* Public — no auth. The actual shareable page for an event. */}
+        <Route path="/e/:slug" element={<PublicEventPage />} />
         <Route
           path="/"
           element={

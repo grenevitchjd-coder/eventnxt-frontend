@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken } from '../api'
+import HomeTab from '../components/HomeTab'
 import GuestTypesTab from '../components/GuestTypesTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
 
 const TABS = [
+  { key: 'home', label: 'Home' },
   { key: 'workspace', label: 'Event workspace' },
   { key: 'guest-types', label: 'Guest types' },
 ]
 
 export default function Dashboard() {
-  const [tab, setTab] = useState('workspace')
+  const [tab, setTab] = useState('home')
   const [toast, setToast] = useState(null)
   const [me, setMe] = useState(null)
   const navigate = useNavigate()
@@ -57,6 +59,7 @@ export default function Dashboard() {
       </aside>
 
       <main className="main">
+        {tab === 'home' && <HomeTab onToast={showToast} />}
         {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
         {tab === 'guest-types' && <GuestTypesTab onToast={showToast} />}
       </main>
