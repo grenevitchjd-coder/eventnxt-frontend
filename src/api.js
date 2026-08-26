@@ -88,9 +88,10 @@ export const api = {
   // Events (my org's)
   listEvents: () => request('/events'),
 
-  // Guest types (org-level)
-  listGuestTypes: () => request('/guest-types'),
-  createGuestType: (payload) => request('/guest-types', { method: 'POST', body: JSON.stringify(payload) }),
+  // Guest types (per event)
+  listGuestTypes: (eventId) => request(`/events/${eventId}/guest-types`),
+  createGuestType: (eventId, payload) =>
+    request(`/events/${eventId}/guest-types`, { method: 'POST', body: JSON.stringify(payload) }),
 
   // Seating categories (per event)
   listSeatingCategories: (eventId) => request(`/events/${eventId}/seating-categories`),

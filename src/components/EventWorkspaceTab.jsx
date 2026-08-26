@@ -10,6 +10,9 @@ export default function EventWorkspaceTab({ onToast }) {
   const [categories, setCategories] = useState(null)
   const [guests, setGuests] = useState(null)
 
+  const [typeForm, setTypeForm] = useState({ name: '', default_seating_category_id: '' })
+  const [creatingType, setCreatingType] = useState(false)
+
   const [catForm, setCatForm] = useState({ name: '', capacity: '' })
   const [creatingCat, setCreatingCat] = useState(false)
 
@@ -25,7 +28,7 @@ export default function EventWorkspaceTab({ onToast }) {
   const loadEventData = (id) => {
     setCategories(null)
     setGuests(null)
-    Promise.all([api.listSeatingCategories(id), api.listGuests(id), api.listGuestTypes()])
+    Promise.all([api.listSeatingCategories(id), api.listGuests(id), api.listGuestTypes(id)])
       .then(([cats, gsts, types]) => {
         setCategories(cats)
         setGuests(gsts)
@@ -41,8 +44,6 @@ export default function EventWorkspaceTab({ onToast }) {
       .listEvents()
       .then((evs) => {
         setEvents(evs)
-        // Restore the last-selected event if it still exists, else default
-        // to the first one in the list.
         const restored = evs.find((e) => e.id === eventId)
         const initial = restored ? restored.id : evs[0]?.id || ''
         setEventId(initial)
@@ -56,6 +57,24 @@ export default function EventWorkspaceTab({ onToast }) {
     const id = e.target.value
     setEventId(id)
     if (id) loadEventData(id)
+  }
+
+  const handleCreateType = async (e) => {
+    e.preventDefault()
+    setCreatingType(true)
+    try {
+      await api.createGuestType(loadedEventId, {
+        name: typeForm.name,
+        default_seating_category_id: typeForm.default_seating_category_id || null,
+      })
+      onToast(`"${typeForm.name}" added`)
+      setTypeForm({ name: '', default_seating_category_id: '' })
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setCreatingType(false)
+    }
   }
 
   const handleCreateCategory = async (e) => {
@@ -74,6 +93,16 @@ export default function EventWorkspaceTab({ onToast }) {
     } finally {
       setCreatingCat(false)
     }
+  }
+
+  const handleGuestTypeChange = (e) => {
+    const typeId = e.target.value
+    const selectedType = guestTypes.find((t) => t.id === typeId)
+    setGuestForm({
+      ...guestForm,
+      guest_type_id: typeId,
+      seating_category_id: selectedType?.default_seating_category_id || '',
+    })
   }
 
   const handleCreateGuest = async (e) => {
@@ -109,7 +138,7 @@ export default function EventWorkspaceTab({ onToast }) {
   return (
     <>
       <div className="page-title">Event workspace</div>
-      <p className="page-subtitle">Pick an event from your org to manage its seating and guests.</p>
+      <p className="page-subtitle">Pick an event from your org to manage its guest types, seating, and guests.</p>
 
       {events === null ? null : events.length === 0 ? (
         <div className="data-table">
@@ -139,6 +168,69 @@ export default function EventWorkspaceTab({ onToast }) {
 
       {loadedEventId && categories !== null && guests !== null && (
         <>
+          <div className="panel">
+            <div className="panel-title">Add a guest type</div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
+              Specific to this event — Celebrity, Sponsor, Volunteer, etc. The default seating pre-fills
+              when adding a guest of this type, but stays fully editable per person.
+            </p>
+            <form className="inline-form" onSubmit={handleCreateType}>
+              <div className="field">
+                <label htmlFor="type-name">Name</label>
+                <input
+                  id="type-name"
+                  required
+                  placeholder="Volunteer"
+                  value={typeForm.name}
+                  onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="type-default-seating">Default seating (optional)</label>
+                <select
+                  id="type-default-seating"
+                  value={typeForm.default_seating_category_id}
+                  onChange={(e) => setTypeForm({ ...typeForm, default_seating_category_id: e.target.value })}
+                >
+                  <option value="">None</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button className="btn btn-secondary" type="submit" disabled={creatingType}>
+                Add guest type
+              </button>
+            </form>
+          </div>
+
+          <table className="data-table" style={{ marginBottom: 28 }}>
+            <thead>
+              <tr>
+                <th>Guest type</th>
+                <th>Default seating</th>
+              </tr>
+            </thead>
+            <tbody>
+              {guestTypes.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="empty-state">
+                    No guest types yet for this event.
+                  </td>
+                </tr>
+              ) : (
+                guestTypes.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.name}</td>
+                    <td>{t.default_seating_category_id ? categoryName(t.default_seating_category_id) : '—'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
           <div className="panel">
             <div className="panel-title">Add a seating category</div>
             <form className="inline-form" onSubmit={handleCreateCategory}>
@@ -218,12 +310,7 @@ export default function EventWorkspaceTab({ onToast }) {
               </div>
               <div className="field">
                 <label htmlFor="g-type">Guest type</label>
-                <select
-                  id="g-type"
-                  required
-                  value={guestForm.guest_type_id}
-                  onChange={(e) => setGuestForm({ ...guestForm, guest_type_id: e.target.value })}
-                >
+                <select id="g-type" required value={guestForm.guest_type_id} onChange={handleGuestTypeChange}>
                   <option value="" disabled>
                     Choose…
                   </option>
