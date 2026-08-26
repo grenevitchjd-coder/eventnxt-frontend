@@ -292,7 +292,7 @@ export default function HomeTab({ onToast }) {
 
         <div className="panel">
           <div className="panel-title">Details</div>
-          <form onSubmit={handleSave}>
+            <form id="details-form" onSubmit={handleSave}>
             <div className="field" style={{ marginBottom: 14 }}>
               <label htmlFor="p-title">Title</label>
               <input
@@ -629,7 +629,7 @@ export default function HomeTab({ onToast }) {
                   ? 'Live — anyone with the link can see this page.'
                   : "Not published — the link won't work until you publish."}
               </p>
-              <button
+                <button
                 className={profile.is_published ? 'btn btn-danger' : 'btn btn-primary'}
                 style={profile.is_published ? {} : { width: 'auto' }}
                 onClick={togglePublish}
@@ -640,6 +640,10 @@ export default function HomeTab({ onToast }) {
             </>
           )}
         </div>
+
+        <button className="btn btn-secondary" type="submit" form="details-form" disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
       </>
     )
   }

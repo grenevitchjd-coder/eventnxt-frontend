@@ -23,7 +23,7 @@ function formatDateRange(start, end) {
   return `${startStr} – ${endStr}`
 }
 
-function formatScheduleTime(value) {
+function formatSpecialDateTime(value) {
   return new Date(value).toLocaleString(undefined, {
     weekday: 'short',
     month: 'short',
@@ -31,6 +31,17 @@ function formatScheduleTime(value) {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+function formatDailyTime(value) {
+  // value is "HH:MM" (24-hour, plain string, no timezone) — parsed and
+  // reformatted purely for locale-aware 12-hour display, never converted
+  // through a Date/UTC round-trip, since it's venue-local wall-clock time,
+  // not a moment in UTC.
+  const [hours, minutes] = value.split(':')
+  const d = new Date()
+  d.setHours(Number(hours), Number(minutes))
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
 export default function PublicEventPage() {
@@ -67,6 +78,8 @@ export default function PublicEventPage() {
   const dateRange = formatDateRange(profile.cached_start_date, profile.cached_end_date)
   const contactLinks = (profile.links || []).filter((l) => l.kind === 'contact')
   const socialLinks = (profile.links || []).filter((l) => l.kind === 'social')
+  const dailySchedule = profile.daily_schedule || []
+  const specialSchedule = profile.schedule || []
 
   return (
     <div className="public-event-page">
@@ -77,6 +90,8 @@ export default function PublicEventPage() {
         {profile.logo_url && <img src={profile.logo_url} alt="" className="public-event-logo" />}
 
         <h1 className="public-event-title">{profile.title}</h1>
+        {/* Dates are always their own thing on the page — the event's real
+            date range, shown once, separate from any schedule detail. */}
         {dateRange && <p className="public-event-dates">{dateRange}</p>}
         {profile.address && <p className="public-event-address">{profile.address}</p>}
         {profile.description && <p className="public-event-description">{profile.description}</p>}
@@ -92,13 +107,27 @@ export default function PublicEventPage() {
           </a>
         )}
 
-        {profile.schedule && profile.schedule.length > 0 && (
+        {dailySchedule.length > 0 && (
           <div className="public-event-section">
-            <h2 className="public-event-section-title">Schedule</h2>
+            <h2 className="public-event-section-title">Daily Schedule</h2>
             <ul className="public-event-schedule">
-              {profile.schedule.map((item, i) => (
+              {dailySchedule.map((item, i) => (
                 <li key={i}>
-                  <span className="public-event-schedule-time">{formatScheduleTime(item.event_datetime)}</span>
+                  <span className="public-event-schedule-time">{formatDailyTime(item.time_of_day)}</span>
+                  <span className="public-event-schedule-label">{item.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {specialSchedule.length > 0 && (
+          <div className="public-event-section">
+            <h2 className="public-event-section-title">Special Dates</h2>
+            <ul className="public-event-schedule">
+              {specialSchedule.map((item, i) => (
+                <li key={i}>
+                  <span className="public-event-schedule-time">{formatSpecialDateTime(item.event_datetime)}</span>
                   <span className="public-event-schedule-label">{item.label}</span>
                 </li>
               ))}
