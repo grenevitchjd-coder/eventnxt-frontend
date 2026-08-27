@@ -58,9 +58,7 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      <main className="main">
-        {tab === 'home' && <HomeTab onToast={showToast} />}
-        {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
+            <main className="main">
         {tab === 'home' && <HomeTab onToast={showToast} />}
         {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
         {tab === 'guests' && <GuestListTab onToast={showToast} />}
