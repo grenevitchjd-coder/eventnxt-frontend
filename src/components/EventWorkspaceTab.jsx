@@ -17,7 +17,6 @@ export default function EventWorkspaceTab({ onToast }) {
 
   const [guestTypes, setGuestTypes] = useState([])
   const [categories, setCategories] = useState(null)
-  const [guests, setGuests] = useState(null)
 
   // ---- Seating categories ----
   const [catForm, setCatForm] = useState({ name: '', capacity: '' })
@@ -37,26 +36,11 @@ export default function EventWorkspaceTab({ onToast }) {
   const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
   const [addingPriority, setAddingPriority] = useState(false)
 
-  // ---- Guests ----
-  const [guestForm, setGuestForm] = useState({
-    name: '',
-    email: '',
-    guest_type_id: '',
-    seating_category_id: '',
-    allocation_status: 'confirmed',
-  })
-  const [creatingGuest, setCreatingGuest] = useState(false)
-  const [editingGuestId, setEditingGuestId] = useState(null)
-  const [guestEditForm, setGuestEditForm] = useState(null)
-  const [savingGuest, setSavingGuest] = useState(false)
-
   const loadEventData = (id) => {
     setCategories(null)
-    setGuests(null)
-    Promise.all([api.listSeatingCategories(id), api.listGuests(id), api.listGuestTypes(id)])
-      .then(([cats, gsts, types]) => {
+    Promise.all([api.listSeatingCategories(id), api.listGuestTypes(id)])
+      .then(([cats, types]) => {
         setCategories(cats)
-        setGuests(gsts)
         setGuestTypes(types)
         setLoadedEventId(id)
         setExpandedTypeId(null)
@@ -85,7 +69,6 @@ export default function EventWorkspaceTab({ onToast }) {
     setEventId(id)
     setEditingCatId(null)
     setEditingTypeId(null)
-    setEditingGuestId(null)
     if (id) loadEventData(id)
   }
 
@@ -227,78 +210,15 @@ export default function EventWorkspaceTab({ onToast }) {
     }
   }
 
-  // ---------- Guests ----------
-
-  const handleCreateGuest = async (e) => {
-    e.preventDefault()
-    setCreatingGuest(true)
-    try {
-      await api.createGuest(loadedEventId, {
-        name: guestForm.name,
-        email: guestForm.email,
-        guest_type_id: guestForm.guest_type_id,
-        seating_category_id: guestForm.seating_category_id || null,
-        allocation_status: guestForm.allocation_status,
-      })
-      onToast(`${guestForm.name} added`)
-      setGuestForm({ name: '', email: '', guest_type_id: '', seating_category_id: '', allocation_status: 'confirmed' })
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setCreatingGuest(false)
-    }
-  }
-
-  const startEditGuest = (guest) => {
-    setEditingGuestId(guest.id)
-    setGuestEditForm({
-      name: guest.name,
-      email: guest.email,
-      guest_type_id: guest.guest_type_id,
-      seating_category_id: guest.seating_category_id || '',
-      allocation_status: guest.allocation_status,
-    })
-  }
-
-  const saveEditGuest = async (guestId) => {
-    setSavingGuest(true)
-    try {
-      await api.updateGuest(loadedEventId, guestId, {
-        name: guestEditForm.name,
-        email: guestEditForm.email,
-        guest_type_id: guestEditForm.guest_type_id,
-        seating_category_id: guestEditForm.seating_category_id || null,
-        allocation_status: guestEditForm.allocation_status,
-      })
-      onToast('Saved')
-      setEditingGuestId(null)
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingGuest(false)
-    }
-  }
-
-  const deleteGuest = async (guest) => {
-    if (!window.confirm(`Remove ${guest.name}?`)) return
-    try {
-      await api.deleteGuest(loadedEventId, guest.id)
-      onToast(`${guest.name} removed`)
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    }
-  }
-
   const categoryName = (id) => categories?.find((c) => c.id === id)?.name || '—'
-  const guestTypeName = (id) => guestTypes?.find((t) => t.id === id)?.name || 'unknown'
 
   return (
     <>
       <div className="page-title">Event workspace</div>
-      <p className="page-subtitle">Pick an event from your org to manage its seating, guest types, and guests.</p>
+      <p className="page-subtitle">
+        Pick an event from your org to manage its seating categories and guest types. Add or import guests
+        from the Guest list tab.
+      </p>
 
       {events === null ? null : events.length === 0 ? (
         <div className="data-table">
@@ -326,7 +246,7 @@ export default function EventWorkspaceTab({ onToast }) {
         </div>
       )}
 
-      {loadedEventId && categories !== null && guests !== null && (
+      {loadedEventId && categories !== null && (
         <>
           {/* ---------- Seating categories FIRST — guest types' priority lists depend on these existing ---------- */}
           <div className="panel">
@@ -451,7 +371,7 @@ export default function EventWorkspaceTab({ onToast }) {
             </form>
           </div>
 
-          <table className="data-table" style={{ marginBottom: 28 }}>
+          <table className="data-table">
             <thead>
               <tr>
                 <th></th>
@@ -588,197 +508,6 @@ export default function EventWorkspaceTab({ onToast }) {
                     )}
                   </Fragment>
                 ))
-              )}
-            </tbody>
-          </table>
-
-          {/* ---------- Guests ---------- */}
-          <div className="panel">
-            <div className="panel-title">Add a guest</div>
-            <form className="inline-form" onSubmit={handleCreateGuest}>
-              <div className="field">
-                <label htmlFor="g-name">Name</label>
-                <input
-                  id="g-name"
-                  required
-                  value={guestForm.name}
-                  onChange={(e) => setGuestForm({ ...guestForm, name: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-email">Email</label>
-                <input
-                  id="g-email"
-                  type="email"
-                  required
-                  value={guestForm.email}
-                  onChange={(e) => setGuestForm({ ...guestForm, email: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-type">Guest type</label>
-                <select
-                  id="g-type"
-                  required
-                  value={guestForm.guest_type_id}
-                  onChange={(e) => setGuestForm({ ...guestForm, guest_type_id: e.target.value })}
-                >
-                  <option value="" disabled>
-                    Choose…
-                  </option>
-                  {guestTypes.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="g-category">Seating category</label>
-                <select
-                  id="g-category"
-                  value={guestForm.seating_category_id}
-                  onChange={(e) => setGuestForm({ ...guestForm, seating_category_id: e.target.value })}
-                >
-                  <option value="">Auto (from guest type's priority list)</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="g-status">Status</label>
-                <select
-                  id="g-status"
-                  value={guestForm.allocation_status}
-                  onChange={(e) => setGuestForm({ ...guestForm, allocation_status: e.target.value })}
-                >
-                  <option value="confirmed">Confirmed</option>
-                  <option value="pending">Pending</option>
-                </select>
-              </div>
-              <button className="btn btn-secondary" type="submit" disabled={creatingGuest}>
-                Add guest
-              </button>
-            </form>
-          </div>
-
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Type</th>
-                <th>Category</th>
-                <th>Status</th>
-                <th>RSVP link</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {guests.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="empty-state">
-                    No guests yet.
-                  </td>
-                </tr>
-              ) : (
-                guests.map((g) =>
-                  editingGuestId === g.id ? (
-                    <tr key={g.id}>
-                      <td>
-                        <input
-                          value={guestEditForm.name}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="email"
-                          value={guestEditForm.email}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, email: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.guest_type_id}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, guest_type_id: e.target.value })}
-                        >
-                          {guestTypes.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.seating_category_id}
-                          onChange={(e) =>
-                            setGuestEditForm({ ...guestEditForm, seating_category_id: e.target.value })
-                          }
-                        >
-                          <option value="">None</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.allocation_status}
-                          onChange={(e) =>
-                            setGuestEditForm({ ...guestEditForm, allocation_status: e.target.value })
-                          }
-                        >
-                          <option value="confirmed">Confirmed</option>
-                          <option value="pending">Pending</option>
-                        </select>
-                      </td>
-                      <td className="mono">{g.rsvp_token}</td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={savingGuest}
-                          onClick={() => saveEditGuest(g.id)}
-                        >
-                          Save
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingGuestId(null)}>
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={g.id}>
-                      <td>{g.name}</td>
-                      <td className="mono">{g.email}</td>
-                      <td>{guestTypeName(g.guest_type_id)}</td>
-                      <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>
-                      <td>
-                        <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
-                      </td>
-                      <td className="mono">{g.rsvp_token}</td>
-                      <td className="actions-cell">
-                        <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )
               )}
             </tbody>
           </table>

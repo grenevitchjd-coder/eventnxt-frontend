@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { api, clearToken } from '../api'
 import HomeTab from '../components/HomeTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
+import GuestListTab from '../components/GuestListTab'
 
 const TABS = [
   { key: 'home', label: 'Home' },
   { key: 'workspace', label: 'Event workspace' },
+  { key: 'guests', label: 'Guest list' },
 ]
 
 export default function Dashboard() {
@@ -59,6 +61,9 @@ export default function Dashboard() {
       <main className="main">
         {tab === 'home' && <HomeTab onToast={showToast} />}
         {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
+        {tab === 'home' && <HomeTab onToast={showToast} />}
+        {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
+        {tab === 'guests' && <GuestListTab onToast={showToast} />}
       </main>
 
       {toast && <div className={`toast ${toast.isError ? 'toast-error' : ''}`}>{toast.message}</div>}
