@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api'
 
 const selectStyle = {
@@ -26,12 +26,16 @@ export default function EventWorkspaceTab({ onToast }) {
   const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '' })
   const [savingCat, setSavingCat] = useState(false)
 
-  // ---- Guest types ----
-  const [typeForm, setTypeForm] = useState({ name: '', default_seating_category_id: '' })
+  // ---- Guest types (accordion) ----
+  const [typeForm, setTypeForm] = useState({ name: '' })
   const [creatingType, setCreatingType] = useState(false)
   const [editingTypeId, setEditingTypeId] = useState(null)
-  const [typeEditForm, setTypeEditForm] = useState({ name: '', default_seating_category_id: '' })
+  const [typeEditForm, setTypeEditForm] = useState({ name: '' })
   const [savingType, setSavingType] = useState(false)
+  const [expandedTypeId, setExpandedTypeId] = useState(null)
+  const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
+  const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
+  const [addingPriority, setAddingPriority] = useState(false)
 
   // ---- Guests ----
   const [guestForm, setGuestForm] = useState({
@@ -55,6 +59,8 @@ export default function EventWorkspaceTab({ onToast }) {
         setGuests(gsts)
         setGuestTypes(types)
         setLoadedEventId(id)
+        setExpandedTypeId(null)
+        setPriorityLists({})
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
@@ -133,18 +139,15 @@ export default function EventWorkspaceTab({ onToast }) {
     }
   }
 
-  // ---------- Guest types ----------
+  // ---------- Guest types + priority seating ----------
 
   const handleCreateType = async (e) => {
     e.preventDefault()
     setCreatingType(true)
     try {
-      await api.createGuestType(loadedEventId, {
-        name: typeForm.name,
-        default_seating_category_id: typeForm.default_seating_category_id || null,
-      })
+      await api.createGuestType(loadedEventId, { name: typeForm.name })
       onToast(`"${typeForm.name}" added`)
-      setTypeForm({ name: '', default_seating_category_id: '' })
+      setTypeForm({ name: '' })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -155,16 +158,13 @@ export default function EventWorkspaceTab({ onToast }) {
 
   const startEditType = (type) => {
     setEditingTypeId(type.id)
-    setTypeEditForm({ name: type.name, default_seating_category_id: type.default_seating_category_id || '' })
+    setTypeEditForm({ name: type.name })
   }
 
   const saveEditType = async (typeId) => {
     setSavingType(true)
     try {
-      await api.updateGuestType(loadedEventId, typeId, {
-        name: typeEditForm.name,
-        default_seating_category_id: typeEditForm.default_seating_category_id || null,
-      })
+      await api.updateGuestType(loadedEventId, typeId, { name: typeEditForm.name })
       onToast('Saved')
       setEditingTypeId(null)
       loadEventData(loadedEventId)
@@ -186,17 +186,48 @@ export default function EventWorkspaceTab({ onToast }) {
     }
   }
 
-  // ---------- Guests ----------
-
-  const handleGuestTypeChange = (e) => {
-    const typeId = e.target.value
-    const selectedType = guestTypes.find((t) => t.id === typeId)
-    setGuestForm({
-      ...guestForm,
-      guest_type_id: typeId,
-      seating_category_id: selectedType?.default_seating_category_id || '',
-    })
+  const toggleExpandType = (typeId) => {
+    if (expandedTypeId === typeId) {
+      setExpandedTypeId(null)
+      return
+    }
+    setExpandedTypeId(typeId)
+    setAddPriorityCategoryId('')
+    if (!priorityLists[typeId]) {
+      api
+        .listSeatingPriorities(loadedEventId, typeId)
+        .then((list) => setPriorityLists({ ...priorityLists, [typeId]: list }))
+        .catch((e) => onToast(e.message, true))
+    }
   }
+
+  const handleAddPriority = async (typeId) => {
+    if (!addPriorityCategoryId) return
+    setAddingPriority(true)
+    try {
+      await api.addSeatingPriority(loadedEventId, typeId, { seating_category_id: addPriorityCategoryId })
+      const updated = await api.listSeatingPriorities(loadedEventId, typeId)
+      setPriorityLists({ ...priorityLists, [typeId]: updated })
+      setAddPriorityCategoryId('')
+      onToast('Added to priority list')
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setAddingPriority(false)
+    }
+  }
+
+  const handleDeletePriority = async (typeId, priorityId) => {
+    try {
+      await api.deleteSeatingPriority(loadedEventId, typeId, priorityId)
+      const updated = await api.listSeatingPriorities(loadedEventId, typeId)
+      setPriorityLists({ ...priorityLists, [typeId]: updated })
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
+  // ---------- Guests ----------
 
   const handleCreateGuest = async (e) => {
     e.preventDefault()
@@ -297,7 +328,7 @@ export default function EventWorkspaceTab({ onToast }) {
 
       {loadedEventId && categories !== null && guests !== null && (
         <>
-          {/* ---------- Seating categories FIRST — guest types depend on these existing ---------- */}
+          {/* ---------- Seating categories FIRST — guest types' priority lists depend on these existing ---------- */}
           <div className="panel">
             <div className="panel-title">Add a seating category</div>
             <form className="inline-form" onSubmit={handleCreateCategory}>
@@ -395,12 +426,13 @@ export default function EventWorkspaceTab({ onToast }) {
             </tbody>
           </table>
 
-          {/* ---------- Guest types SECOND — can now reference real categories ---------- */}
+          {/* ---------- Guest types SECOND — accordion, expand to manage priority seating list ---------- */}
           <div className="panel">
             <div className="panel-title">Add a guest type</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
-              Specific to this event — Celebrity, Sponsor, Volunteer, etc. The default seating pre-fills
-              when adding a guest of this type, but stays fully editable per person.
+              Specific to this event — Celebrity, Sponsor, Volunteer, etc. Once added, expand it to set an
+              ordered seating preference list — e.g. try 2A, then 2B, then 4A — used automatically when a
+              guest of this type is added without a specific seat.
             </p>
             <form className="inline-form" onSubmit={handleCreateType}>
               <div className="field">
@@ -410,23 +442,8 @@ export default function EventWorkspaceTab({ onToast }) {
                   required
                   placeholder="Volunteer"
                   value={typeForm.name}
-                  onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })}
+                  onChange={(e) => setTypeForm({ name: e.target.value })}
                 />
-              </div>
-              <div className="field">
-                <label htmlFor="type-default-seating">Default seating (optional)</label>
-                <select
-                  id="type-default-seating"
-                  value={typeForm.default_seating_category_id}
-                  onChange={(e) => setTypeForm({ ...typeForm, default_seating_category_id: e.target.value })}
-                >
-                  <option value="">None</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
                 Add guest type
@@ -437,8 +454,8 @@ export default function EventWorkspaceTab({ onToast }) {
           <table className="data-table" style={{ marginBottom: 28 }}>
             <thead>
               <tr>
+                <th></th>
                 <th>Guest type</th>
-                <th>Default seating</th>
                 <th></th>
               </tr>
             </thead>
@@ -450,60 +467,127 @@ export default function EventWorkspaceTab({ onToast }) {
                   </td>
                 </tr>
               ) : (
-                guestTypes.map((t) =>
-                  editingTypeId === t.id ? (
-                    <tr key={t.id}>
-                      <td>
-                        <input
-                          value={typeEditForm.name}
-                          onChange={(e) => setTypeEditForm({ ...typeEditForm, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={typeEditForm.default_seating_category_id}
-                          onChange={(e) =>
-                            setTypeEditForm({ ...typeEditForm, default_seating_category_id: e.target.value })
-                          }
-                        >
-                          <option value="">None</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={savingType}
-                          onClick={() => saveEditType(t.id)}
-                        >
-                          Save
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingTypeId(null)}>
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={t.id}>
-                      <td>{t.name}</td>
-                      <td>{t.default_seating_category_id ? categoryName(t.default_seating_category_id) : '—'}</td>
-                      <td className="actions-cell">
-                        <button className="btn btn-secondary btn-sm" onClick={() => startEditType(t)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => deleteType(t)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )
+                guestTypes.map((t) => (
+                  <Fragment key={t.id}>
+                    {editingTypeId === t.id ? (
+                      <tr>
+                        <td></td>
+                        <td>
+                          <input
+                            value={typeEditForm.name}
+                            onChange={(e) => setTypeEditForm({ name: e.target.value })}
+                            style={{ width: '100%' }}
+                          />
+                        </td>
+                        <td className="actions-cell">
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            disabled={savingType}
+                            onClick={() => saveEditType(t.id)}
+                          >
+                            Save
+                          </button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingTypeId(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr style={{ cursor: 'pointer' }} onClick={() => toggleExpandType(t.id)}>
+                        <td style={{ width: 24, color: 'var(--text-muted)' }}>
+                          {expandedTypeId === t.id ? '▾' : '▸'}
+                        </td>
+                        <td>{t.name}</td>
+                        <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => startEditType(t)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteType(t)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    {expandedTypeId === t.id && (
+                      <tr>
+                        <td></td>
+                        <td colSpan={2} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                          <div
+                            style={{
+                              background: 'var(--surface-alt)',
+                              borderRadius: 8,
+                              padding: '12px 14px',
+                            }}
+                          >
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                              Seating priority — tried in order, top first
+                            </div>
+                            {!priorityLists[t.id] ? (
+                              <p style={{ fontSize: 13 }}>Loading…</p>
+                            ) : priorityLists[t.id].length === 0 ? (
+                              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                                No preferences set — guests of this type stay unassigned unless a seat is
+                                picked manually.
+                              </p>
+                            ) : (
+                              <ol style={{ margin: '0 0 10px', paddingLeft: 20 }}>
+                                {priorityLists[t.id].map((p) => (
+                                  <li
+                                    key={p.id}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      fontSize: 13.5,
+                                      padding: '4px 0',
+                                    }}
+                                  >
+                                    <span>{categoryName(p.seating_category_id)}</span>
+                                    <button
+                                      className="btn btn-danger btn-sm"
+                                      onClick={() => handleDeletePriority(t.id, p.id)}
+                                    >
+                                      Remove
+                                    </button>
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <select
+                                style={selectStyle}
+                                value={addPriorityCategoryId}
+                                onChange={(e) => setAddPriorityCategoryId(e.target.value)}
+                              >
+                                <option value="">Choose a category to add…</option>
+                                {categories
+                                  .filter(
+                                    (c) => !(priorityLists[t.id] || []).some((p) => p.seating_category_id === c.id)
+                                  )
+                                  .map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                              </select>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled={addingPriority || !addPriorityCategoryId}
+                                onClick={() => handleAddPriority(t.id)}
+                              >
+                                Add
+                              </button>
+                            </div>
+                            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+                              New entries go to the bottom of the list. To reorder, remove and re-add in the
+                              order you want.
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))
               )}
             </tbody>
           </table>
@@ -533,7 +617,12 @@ export default function EventWorkspaceTab({ onToast }) {
               </div>
               <div className="field">
                 <label htmlFor="g-type">Guest type</label>
-                <select id="g-type" required value={guestForm.guest_type_id} onChange={handleGuestTypeChange}>
+                <select
+                  id="g-type"
+                  required
+                  value={guestForm.guest_type_id}
+                  onChange={(e) => setGuestForm({ ...guestForm, guest_type_id: e.target.value })}
+                >
                   <option value="" disabled>
                     Choose…
                   </option>
@@ -551,7 +640,7 @@ export default function EventWorkspaceTab({ onToast }) {
                   value={guestForm.seating_category_id}
                   onChange={(e) => setGuestForm({ ...guestForm, seating_category_id: e.target.value })}
                 >
-                  <option value="">None</option>
+                  <option value="">Auto (from guest type's priority list)</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
