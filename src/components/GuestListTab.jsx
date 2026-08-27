@@ -66,6 +66,8 @@ export default function GuestListTab({ onToast }) {
     guest_type_id: '',
     seating_category_id: '',
     allocation_status: 'confirmed',
+    party_size: 1,
+    allotment_ticket_count: '',
   })
   const [creatingGuest, setCreatingGuest] = useState(false)
   const [editingGuestId, setEditingGuestId] = useState(null)
@@ -126,9 +128,19 @@ export default function GuestListTab({ onToast }) {
         guest_type_id: guestForm.guest_type_id,
         seating_category_id: guestForm.seating_category_id || null,
         allocation_status: guestForm.allocation_status,
+        party_size: Number(guestForm.party_size) || 1,
+        allotment_ticket_count: guestForm.allotment_ticket_count === '' ? null : Number(guestForm.allotment_ticket_count),
       })
       onToast(`${guestForm.name} added`)
-      setGuestForm({ name: '', email: '', guest_type_id: '', seating_category_id: '', allocation_status: 'confirmed' })
+      setGuestForm({
+        name: '',
+        email: '',
+        guest_type_id: '',
+        seating_category_id: '',
+        allocation_status: 'confirmed',
+        party_size: 1,
+        allotment_ticket_count: '',
+      })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -145,6 +157,8 @@ export default function GuestListTab({ onToast }) {
       guest_type_id: guest.guest_type_id,
       seating_category_id: guest.seating_category_id || '',
       allocation_status: guest.allocation_status,
+      party_size: guest.party_size || 1,
+      allotment_ticket_count: guest.allotment_ticket_count ?? '',
     })
   }
 
@@ -157,6 +171,9 @@ export default function GuestListTab({ onToast }) {
         guest_type_id: guestEditForm.guest_type_id,
         seating_category_id: guestEditForm.seating_category_id || null,
         allocation_status: guestEditForm.allocation_status,
+        party_size: Number(guestEditForm.party_size) || 1,
+        allotment_ticket_count:
+          guestEditForm.allotment_ticket_count === '' ? null : Number(guestEditForm.allotment_ticket_count),
       })
       onToast('Saved')
       setEditingGuestId(null)
@@ -438,7 +455,31 @@ export default function GuestListTab({ onToast }) {
                 >
                   <option value="confirmed">Confirmed</option>
                   <option value="pending">Pending</option>
+                  <option value="declined">Declined</option>
                 </select>
+              </div>
+              <div className="field">
+                <label htmlFor="g-party-size">Party size</label>
+                <input
+                  id="g-party-size"
+                  type="number"
+                  min={1}
+                  style={{ width: 80 }}
+                  value={guestForm.party_size}
+                  onChange={(e) => setGuestForm({ ...guestForm, party_size: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="g-ticket-count">Tickets to give out</label>
+                <input
+                  id="g-ticket-count"
+                  type="number"
+                  min={0}
+                  placeholder="Type default"
+                  style={{ width: 120 }}
+                  value={guestForm.allotment_ticket_count}
+                  onChange={(e) => setGuestForm({ ...guestForm, allotment_ticket_count: e.target.value })}
+                />
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingGuest}>
                 Add guest
@@ -601,6 +642,7 @@ export default function GuestListTab({ onToast }) {
                 <th>Type</th>
                 <th>Category</th>
                 <th>Status</th>
+                <th>Tickets</th>
                 <th>RSVP link</th>
                 <th></th>
               </tr>
@@ -608,7 +650,7 @@ export default function GuestListTab({ onToast }) {
             <tbody>
               {guests.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={8} className="empty-state">
                     No guests yet.
                   </td>
                 </tr>
@@ -670,7 +712,31 @@ export default function GuestListTab({ onToast }) {
                         >
                           <option value="confirmed">Confirmed</option>
                           <option value="pending">Pending</option>
+                          <option value="declined">Declined</option>
                         </select>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            min={1}
+                            title="Party size"
+                            style={{ ...selectStyle, width: 55 }}
+                            value={guestEditForm.party_size}
+                            onChange={(e) => setGuestEditForm({ ...guestEditForm, party_size: e.target.value })}
+                          />
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="Give out"
+                            title="Tickets to give out (blank = type default)"
+                            style={{ ...selectStyle, width: 70 }}
+                            value={guestEditForm.allotment_ticket_count}
+                            onChange={(e) =>
+                              setGuestEditForm({ ...guestEditForm, allotment_ticket_count: e.target.value })
+                            }
+                          />
+                        </div>
                       </td>
                       <td className="mono">{g.rsvp_token}</td>
                       <td className="actions-cell">
@@ -694,6 +760,15 @@ export default function GuestListTab({ onToast }) {
                       <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>
                       <td>
                         <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
+                      </td>
+                      <td style={{ fontSize: 12.5 }}>
+                        {g.party_size > 1 && <span>party of {g.party_size}</span>}
+                        {g.allotment_ticket_count > 0 && (
+                          <span style={{ display: 'block', color: 'var(--text-muted)' }}>
+                            gives out {g.allotment_ticket_count}
+                          </span>
+                        )}
+                        {!(g.party_size > 1) && !(g.allotment_ticket_count > 0) && '—'}
                       </td>
                       <td className="mono">{g.rsvp_token}</td>
                       <td className="actions-cell">

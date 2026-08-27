@@ -382,6 +382,14 @@ a:focus-visible {
   background: var(--gold);
 }
 
+.pill-declined {
+  background: rgba(200, 80, 80, 0.12);
+  color: var(--danger, #c55);
+}
+.pill-declined::before {
+  background: var(--danger, #c55);
+}
+
 .toast {
   position: fixed;
   bottom: 24px;

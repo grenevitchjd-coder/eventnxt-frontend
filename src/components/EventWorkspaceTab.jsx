@@ -35,6 +35,9 @@ export default function EventWorkspaceTab({ onToast }) {
   const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
   const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
   const [addingPriority, setAddingPriority] = useState(false)
+  // Ticket allotment defaults, edited inline in the accordion
+  const [allotmentDraft, setAllotmentDraft] = useState({ ticketCount: '', dates: [], newDate: '' })
+  const [savingAllotment, setSavingAllotment] = useState(false)
 
   const loadEventData = (id) => {
     setCategories(null)
@@ -176,12 +179,48 @@ export default function EventWorkspaceTab({ onToast }) {
     }
     setExpandedTypeId(typeId)
     setAddPriorityCategoryId('')
+    const type = guestTypes.find((t) => t.id === typeId)
+    setAllotmentDraft({
+      ticketCount: type?.default_ticket_count ?? '',
+      dates: type?.default_valid_dates || [],
+      newDate: '',
+    })
     if (!priorityLists[typeId]) {
       api
         .listSeatingPriorities(loadedEventId, typeId)
         .then((list) => setPriorityLists({ ...priorityLists, [typeId]: list }))
         .catch((e) => onToast(e.message, true))
     }
+  }
+
+  const saveAllotmentDefaults = async (type) => {
+    setSavingAllotment(true)
+    try {
+      await api.updateGuestType(loadedEventId, type.id, {
+        name: type.name,
+        default_ticket_count: allotmentDraft.ticketCount === '' ? null : Number(allotmentDraft.ticketCount),
+        default_valid_dates: allotmentDraft.dates.length > 0 ? allotmentDraft.dates : null,
+      })
+      onToast('Ticket allotment saved')
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingAllotment(false)
+    }
+  }
+
+  const addAllotmentDate = () => {
+    if (!allotmentDraft.newDate || allotmentDraft.dates.includes(allotmentDraft.newDate)) return
+    setAllotmentDraft({
+      ...allotmentDraft,
+      dates: [...allotmentDraft.dates, allotmentDraft.newDate].sort(),
+      newDate: '',
+    })
+  }
+
+  const removeAllotmentDate = (date) => {
+    setAllotmentDraft({ ...allotmentDraft, dates: allotmentDraft.dates.filter((d) => d !== date) })
   }
 
   const handleAddPriority = async (typeId) => {
@@ -502,6 +541,80 @@ export default function EventWorkspaceTab({ onToast }) {
                               New entries go to the bottom of the list. To reorder, remove and re-add in the
                               order you want.
                             </p>
+                          </div>
+
+                          <div
+                            style={{
+                              background: 'var(--surface-alt)',
+                              borderRadius: 8,
+                              padding: '12px 14px',
+                              marginTop: 12,
+                            }}
+                          >
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                              Ticket allotment — how many tickets a guest of this type gets to hand out
+                              themselves, and which dates those tickets are valid for. Leave ticket count
+                              blank for an ordinary yes/no guest with nothing to distribute. Overridable per
+                              guest when adding them.
+                            </div>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                              <div className="field" style={{ width: 140 }}>
+                                <label>Ticket count</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  placeholder="None"
+                                  value={allotmentDraft.ticketCount}
+                                  onChange={(e) => setAllotmentDraft({ ...allotmentDraft, ticketCount: e.target.value })}
+                                />
+                              </div>
+                              <div className="field" style={{ width: 170 }}>
+                                <label>Add a valid date</label>
+                                <input
+                                  type="date"
+                                  value={allotmentDraft.newDate}
+                                  onChange={(e) => setAllotmentDraft({ ...allotmentDraft, newDate: e.target.value })}
+                                />
+                              </div>
+                              <button className="btn btn-secondary btn-sm" onClick={addAllotmentDate}>
+                                Add date
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled={savingAllotment}
+                                onClick={() => saveAllotmentDefaults(t)}
+                              >
+                                Save allotment
+                              </button>
+                            </div>
+                            {allotmentDraft.dates.length > 0 && (
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                                {allotmentDraft.dates.map((d) => (
+                                  <span
+                                    key={d}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      background: 'var(--bg)',
+                                      border: '1px solid var(--border)',
+                                      borderRadius: 100,
+                                      padding: '4px 6px 4px 12px',
+                                      fontSize: 12.5,
+                                    }}
+                                  >
+                                    {d}
+                                    <button
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '2px 8px' }}
+                                      onClick={() => removeAllotmentDate(d)}
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
