@@ -92,16 +92,30 @@ export const api = {
   listGuestTypes: (eventId) => request(`/events/${eventId}/guest-types`),
   createGuestType: (eventId, payload) =>
     request(`/events/${eventId}/guest-types`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateGuestType: (eventId, guestTypeId, payload) =>
+    request(`/events/${eventId}/guest-types/${guestTypeId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGuestType: (eventId, guestTypeId) =>
+    request(`/events/${eventId}/guest-types/${guestTypeId}`, { method: 'DELETE' }),
 
   // Seating categories (per event)
   listSeatingCategories: (eventId) => request(`/events/${eventId}/seating-categories`),
   createSeatingCategory: (eventId, payload) =>
     request(`/events/${eventId}/seating-categories`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateSeatingCategory: (eventId, categoryId, payload) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteSeatingCategory: (eventId, categoryId) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
 
   // Guests (per event)
   listGuests: (eventId) => request(`/events/${eventId}/guests`),
   createGuest: (eventId, payload) =>
     request(`/events/${eventId}/guests`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateGuest: (eventId, guestId, payload) =>
+    request(`/events/${eventId}/guests/${guestId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
 
   // Event profile (public-facing content + shareable page)
   getEventProfile: (eventId) => request(`/events/${eventId}/profile`, {}, { allow404: true }),
