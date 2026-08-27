@@ -32,6 +32,10 @@ const HEADER_ALIASES = {
 
 const normalizeHeader = (h) => (h || '').toString().toLowerCase().replace(/[^a-z]/g, '')
 
+// The token alone isn't a usable link on its own — this is the actual URL a
+// guest needs to open, built from wherever this app is currently running.
+const rsvpUrl = (token) => `${window.location.origin}/rsvp/${token}`
+
 function rowsFromParsedRecords(records) {
   // records: array of objects keyed by raw header text (from Papa/XLSX)
   return records.map((record) => {
@@ -79,6 +83,10 @@ export default function GuestListTab({ onToast }) {
   const [stagedRows, setStagedRows] = useState(null) // null = no batch staged
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0 })
+
+  // ---- Export ----
+  const [exportTypeFilter, setExportTypeFilter] = useState('')
+  const [exportStatusFilter, setExportStatusFilter] = useState('')
 
   const loadEventData = (id) => {
     setCategories(null)
@@ -215,6 +223,38 @@ export default function GuestListTab({ onToast }) {
     URL.revokeObjectURL(url)
   }
 
+  const handleExportGuests = () => {
+    const filtered = guests.filter((g) => {
+      if (exportTypeFilter && g.guest_type_id !== exportTypeFilter) return false
+      if (exportStatusFilter && g.allocation_status !== exportStatusFilter) return false
+      return true
+    })
+    if (filtered.length === 0) {
+      onToast('No guests match that filter', true)
+      return
+    }
+    const csv = Papa.unparse({
+      fields: ['Name', 'Email', 'Guest Type', 'Seating Category', 'Status', 'Party Size', 'RSVP Link'],
+      data: filtered.map((g) => [
+        g.name,
+        g.email,
+        guestTypeName(g.guest_type_id),
+        g.seating_category_id ? categoryName(g.seating_category_id) : '',
+        g.allocation_status,
+        g.party_size,
+        rsvpUrl(g.rsvp_token),
+      ]),
+    })
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'guest-list-export.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+    onToast(`Exported ${filtered.length} guest(s)`)
+  }
+
   const resolveRow = (raw) => {
     const guestType = guestTypes.find((t) => t.name.toLowerCase() === raw.guestTypeText.toLowerCase())
     const seatingCategory = raw.seatingCategoryText
@@ -347,6 +387,15 @@ export default function GuestListTab({ onToast }) {
 
   const categoryName = (id) => categories?.find((c) => c.id === id)?.name || '—'
   const guestTypeName = (id) => guestTypes?.find((t) => t.id === id)?.name || 'unknown'
+
+  const copyRsvpLink = async (guest) => {
+    try {
+      await navigator.clipboard.writeText(rsvpUrl(guest.rsvp_token))
+      onToast(`Link copied for ${guest.name}`)
+    } catch {
+      onToast('Could not copy — your browser may have blocked clipboard access', true)
+    }
+  }
 
   return (
     <>
@@ -634,6 +683,39 @@ export default function GuestListTab({ onToast }) {
           )}
 
           {/* ---------- Existing guest list ---------- */}
+          <div className="panel">
+            <div className="panel-title">Download guest list</div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
+              Exports name, email, type, seating, status, party size, and each guest's full RSVP link — ready
+              to paste into an email.
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="field" style={{ width: 180 }}>
+                <label>Guest type</label>
+                <select value={exportTypeFilter} onChange={(e) => setExportTypeFilter(e.target.value)}>
+                  <option value="">All types</option>
+                  {guestTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field" style={{ width: 160 }}>
+                <label>Status</label>
+                <select value={exportStatusFilter} onChange={(e) => setExportStatusFilter(e.target.value)}>
+                  <option value="">All statuses</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="pending">Pending</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </div>
+              <button className="btn btn-secondary" onClick={handleExportGuests}>
+                Download CSV
+              </button>
+            </div>
+          </div>
+
           <table className="data-table">
             <thead>
               <tr>
@@ -738,7 +820,21 @@ export default function GuestListTab({ onToast }) {
                           />
                         </div>
                       </td>
-                      <td className="mono">{g.rsvp_token}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <a
+                            href={rsvpUrl(g.rsvp_token)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Open
+                          </a>
+                          <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
+                            Copy
+                          </button>
+                        </div>
+                      </td>
                       <td className="actions-cell">
                         <button
                           className="btn btn-secondary btn-sm"
@@ -770,7 +866,21 @@ export default function GuestListTab({ onToast }) {
                         )}
                         {!(g.party_size > 1) && !(g.allotment_ticket_count > 0) && '—'}
                       </td>
-                      <td className="mono">{g.rsvp_token}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <a
+                            href={rsvpUrl(g.rsvp_token)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Open
+                          </a>
+                          <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
+                            Copy
+                          </button>
+                        </div>
+                      </td>
                       <td className="actions-cell">
                         <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
                           Edit

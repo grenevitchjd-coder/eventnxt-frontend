@@ -452,11 +452,36 @@ export default function EventWorkspaceTab({ onToast }) {
                         </td>
                       </tr>
                     ) : (
-                      <tr style={{ cursor: 'pointer' }} onClick={() => toggleExpandType(t.id)}>
-                        <td style={{ width: 24, color: 'var(--text-muted)' }}>
-                          {expandedTypeId === t.id ? '▾' : '▸'}
+                      <tr
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleExpandType(t.id)}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-alt)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                      >
+                        <td style={{ width: 32 }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              background: 'var(--accent)',
+                              color: '#fff',
+                              fontSize: 12,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {expandedTypeId === t.id ? '▾' : '▸'}
+                          </span>
                         </td>
-                        <td>{t.name}</td>
+                        <td>
+                          <div>{t.name}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            Click to set up seating priority &amp; ticket allotment
+                          </div>
+                        </td>
                         <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
                           <button className="btn btn-secondary btn-sm" onClick={() => startEditType(t)}>
                             Edit
