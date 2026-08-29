@@ -58,8 +58,19 @@ export default function PublicRSVPPage() {
   const addRecipientRow = () => setRecipients((prev) => [...prev, emptyRecipient()])
   const removeRecipientRow = (i) => setRecipients((prev) => prev.filter((_, idx) => idx !== i))
 
-  const totalRequested = recipients.reduce((sum, r) => sum + (Number(r.party_size) || 0), 0)
-  const overLimit = info?.tickets_remaining != null && totalRequested > info.tickets_remaining
+  // Per-day totals — each day is checked against its OWN remaining count,
+  // never a combined number, since the pools genuinely don't share capacity.
+  const requestedByDay = {}
+  for (const r of recipients) {
+    if (!r.visit_date) continue
+    requestedByDay[r.visit_date] = (requestedByDay[r.visit_date] || 0) + (Number(r.party_size) || 0)
+  }
+  const dayOverLimit = (date) => {
+    const day = info?.day_allotments?.find((d) => d.date === date)
+    return day ? requestedByDay[date] > day.remaining : false
+  }
+  const anyDayOverLimit = Object.keys(requestedByDay).some(dayOverLimit)
+  const hasCompleteRow = recipients.some((r) => r.name && r.email && r.visit_date)
 
   const handleDistribute = async () => {
     setSubmitting(true)
@@ -67,7 +78,7 @@ export default function PublicRSVPPage() {
     try {
       const payload = {
         recipients: recipients
-          .filter((r) => r.name && r.email)
+          .filter((r) => r.name && r.email && r.visit_date)
           .map((r) => ({ ...r, party_size: Number(r.party_size) || 1 })),
       }
       const res = await fetch(`${API_URL}/public/rsvp/${token}/distribute`, {
@@ -152,7 +163,9 @@ export default function PublicRSVPPage() {
     )
   }
 
-  // ---------- Allotment holder — distribute tickets to others ----------
+  // ---------- Allotment holder — distribute tickets to others, per day ----------
+  const availableDays = (info.day_allotments || []).filter((d) => d.remaining > 0)
+
   return (
     <div className="public-event-page">
       <div className="public-event-content" style={{ textAlign: 'left', maxWidth: 720 }}>
@@ -162,11 +175,31 @@ export default function PublicRSVPPage() {
         <h1 className="login-title" style={{ textAlign: 'center' }}>
           Hi {info.guest_name}
         </h1>
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: 32 }}>
-          You have <strong>{info.tickets_remaining}</strong> of {info.ticket_count} ticket
-          {info.ticket_count === 1 ? '' : 's'} left to give out
-          {info.valid_dates?.length > 0 && <>, valid for {info.valid_dates.map(formatDate).join(' or ')}</>}.
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: 20 }}>
+          You have tickets to give out — each day below is its own separate amount.
         </p>
+
+        <div className="panel">
+          <div className="panel-title">Your tickets</div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Remaining</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(info.day_allotments || []).map((d) => (
+                <tr key={d.date}>
+                  <td>{formatDate(d.date)}</td>
+                  <td className="mono">{d.remaining}</td>
+                  <td className="mono">{d.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         {info.distributed_recipients?.length > 0 && (
           <div className="panel">
@@ -196,12 +229,13 @@ export default function PublicRSVPPage() {
           </div>
         )}
 
-        {info.tickets_remaining > 0 && (
+        {availableDays.length > 0 && (
           <div className="panel">
             <div className="panel-title">Who gets your remaining tickets?</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
               One line per person by default — but you can put more than one of your tickets under a single
-              name if you'd like to bring a group together.
+              name if you'd like to bring a group together. Each date is its own separate amount, so a
+              Thursday ticket can never come out of your Saturday total.
             </p>
 
             {recipients.map((r, i) => (
@@ -229,19 +263,17 @@ export default function PublicRSVPPage() {
                     onChange={(e) => updateRecipient(i, { email: e.target.value })}
                   />
                 </div>
-                {info.valid_dates?.length > 0 && (
-                  <div className="field" style={{ flex: '1 1 160px' }}>
-                    <label>Date</label>
-                    <select value={r.visit_date} onChange={(e) => updateRecipient(i, { visit_date: e.target.value })}>
-                      <option value="">Choose…</option>
-                      {info.valid_dates.map((d) => (
-                        <option key={d} value={d}>
-                          {formatDate(d)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <div className="field" style={{ flex: '1 1 160px' }}>
+                  <label>Date</label>
+                  <select value={r.visit_date} onChange={(e) => updateRecipient(i, { visit_date: e.target.value })}>
+                    <option value="">Choose…</option>
+                    {(info.day_allotments || []).map((d) => (
+                      <option key={d.date} value={d.date}>
+                        {formatDate(d.date)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="field" style={{ width: 90 }}>
                   <label>Tickets</label>
                   <input
@@ -256,24 +288,24 @@ export default function PublicRSVPPage() {
                     Remove
                   </button>
                 )}
+                {r.visit_date && dayOverLimit(r.visit_date) && (
+                  <p style={{ width: '100%', fontSize: 12, color: 'var(--danger, #c55)', margin: 0 }}>
+                    That's more than the {formatDate(r.visit_date)} amount remaining.
+                  </p>
+                )}
               </div>
             ))}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-              <button className="btn btn-secondary btn-sm" onClick={addRecipientRow}>
-                Add another
-              </button>
-              <span style={{ fontSize: 13, color: overLimit ? 'var(--danger, #c55)' : 'var(--text-muted)' }}>
-                {totalRequested} of {info.tickets_remaining} used
-              </span>
-            </div>
+            <button className="btn btn-secondary btn-sm" onClick={addRecipientRow}>
+              Add another
+            </button>
 
             {submitError && <p style={{ color: 'var(--danger, #c55)', marginTop: 12 }}>{submitError}</p>}
 
             <button
               className="btn btn-primary"
               style={{ marginTop: 16, width: '100%' }}
-              disabled={submitting || overLimit || totalRequested === 0}
+              disabled={submitting || anyDayOverLimit || !hasCompleteRow}
               onClick={handleDistribute}
             >
               Send tickets

@@ -35,9 +35,10 @@ export default function EventWorkspaceTab({ onToast }) {
   const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
   const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
   const [addingPriority, setAddingPriority] = useState(false)
-  // Ticket allotment defaults, edited inline in the accordion
-  const [allotmentDraft, setAllotmentDraft] = useState({ ticketCount: '', dates: [], newDate: '' })
-  const [savingAllotment, setSavingAllotment] = useState(false)
+  // Ticket allotment defaults (per-day), edited inline in the accordion
+  const [ticketAllotments, setTicketAllotments] = useState({}) // guestTypeId -> [{date, quantity}]
+  const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
+  const [savingAllotmentDay, setSavingAllotmentDay] = useState(false)
 
   const loadEventData = (id) => {
     setCategories(null)
@@ -48,6 +49,7 @@ export default function EventWorkspaceTab({ onToast }) {
         setLoadedEventId(id)
         setExpandedTypeId(null)
         setPriorityLists({})
+        setTicketAllotments({})
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
@@ -179,48 +181,50 @@ export default function EventWorkspaceTab({ onToast }) {
     }
     setExpandedTypeId(typeId)
     setAddPriorityCategoryId('')
-    const type = guestTypes.find((t) => t.id === typeId)
-    setAllotmentDraft({
-      ticketCount: type?.default_ticket_count ?? '',
-      dates: type?.default_valid_dates || [],
-      newDate: '',
-    })
+    setNewAllotmentDay({ date: '', quantity: '' })
     if (!priorityLists[typeId]) {
       api
         .listSeatingPriorities(loadedEventId, typeId)
         .then((list) => setPriorityLists({ ...priorityLists, [typeId]: list }))
         .catch((e) => onToast(e.message, true))
     }
-  }
-
-  const saveAllotmentDefaults = async (type) => {
-    setSavingAllotment(true)
-    try {
-      await api.updateGuestType(loadedEventId, type.id, {
-        name: type.name,
-        default_ticket_count: allotmentDraft.ticketCount === '' ? null : Number(allotmentDraft.ticketCount),
-        default_valid_dates: allotmentDraft.dates.length > 0 ? allotmentDraft.dates : null,
-      })
-      onToast('Ticket allotment saved')
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingAllotment(false)
+    if (!ticketAllotments[typeId]) {
+      api
+        .listTicketAllotments(loadedEventId, typeId)
+        .then((list) => setTicketAllotments({ ...ticketAllotments, [typeId]: list }))
+        .catch((e) => onToast(e.message, true))
     }
   }
 
-  const addAllotmentDate = () => {
-    if (!allotmentDraft.newDate || allotmentDraft.dates.includes(allotmentDraft.newDate)) return
-    setAllotmentDraft({
-      ...allotmentDraft,
-      dates: [...allotmentDraft.dates, allotmentDraft.newDate].sort(),
-      newDate: '',
-    })
+  const handleSaveAllotmentDay = async (typeId) => {
+    if (!newAllotmentDay.date || newAllotmentDay.quantity === '') return
+    setSavingAllotmentDay(true)
+    try {
+      await api.upsertTicketAllotmentDay(
+        loadedEventId,
+        typeId,
+        newAllotmentDay.date,
+        Number(newAllotmentDay.quantity)
+      )
+      const updated = await api.listTicketAllotments(loadedEventId, typeId)
+      setTicketAllotments({ ...ticketAllotments, [typeId]: updated })
+      setNewAllotmentDay({ date: '', quantity: '' })
+      onToast('Ticket allotment saved')
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingAllotmentDay(false)
+    }
   }
 
-  const removeAllotmentDate = (date) => {
-    setAllotmentDraft({ ...allotmentDraft, dates: allotmentDraft.dates.filter((d) => d !== date) })
+  const handleDeleteAllotmentDay = async (typeId, date) => {
+    try {
+      await api.deleteTicketAllotmentDay(loadedEventId, typeId, date)
+      const updated = await api.listTicketAllotments(loadedEventId, typeId)
+      setTicketAllotments({ ...ticketAllotments, [typeId]: updated })
+    } catch (err) {
+      onToast(err.message, true)
+    }
   }
 
   const handleAddPriority = async (typeId) => {
@@ -578,68 +582,88 @@ export default function EventWorkspaceTab({ onToast }) {
                           >
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                               Ticket allotment — how many tickets a guest of this type gets to hand out
-                              themselves, and which dates those tickets are valid for. Leave ticket count
-                              blank for an ordinary yes/no guest with nothing to distribute. Overridable per
-                              guest when adding them.
+                              themselves, per day. Each day is its own separate pool — e.g. 10 Thursday
+                              tickets and 5 Saturday tickets never share capacity. Leave empty for an
+                              ordinary yes/no guest with nothing to distribute. Overridable per guest when
+                              adding them.
                             </div>
+
+                            {!ticketAllotments[t.id] ? (
+                              <p style={{ fontSize: 13 }}>Loading…</p>
+                            ) : ticketAllotments[t.id].length === 0 ? (
+                              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                                No ticket allotment set — guests of this type have nothing to distribute.
+                              </p>
+                            ) : (
+                              <table
+                                style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}
+                              >
+                                <thead>
+                                  <tr>
+                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
+                                      Date
+                                    </th>
+                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
+                                      Tickets
+                                    </th>
+                                    <th></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {[...ticketAllotments[t.id]]
+                                    .sort((a, b) => a.date.localeCompare(b.date))
+                                    .map((row) => (
+                                      <tr key={row.date}>
+                                        <td style={{ fontSize: 13.5, padding: '4px 0' }}>{row.date}</td>
+                                        <td style={{ fontSize: 13.5, padding: '4px 0' }} className="mono">
+                                          {row.quantity}
+                                        </td>
+                                        <td style={{ textAlign: 'right' }}>
+                                          <button
+                                            className="btn btn-danger btn-sm"
+                                            onClick={() => handleDeleteAllotmentDay(t.id, row.date)}
+                                          >
+                                            Remove
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
+                            )}
+
                             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                              <div className="field" style={{ width: 140 }}>
-                                <label>Ticket count</label>
+                              <div className="field" style={{ width: 170 }}>
+                                <label>Date</label>
+                                <input
+                                  type="date"
+                                  value={newAllotmentDay.date}
+                                  onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
+                                />
+                              </div>
+                              <div className="field" style={{ width: 110 }}>
+                                <label>Tickets</label>
                                 <input
                                   type="number"
                                   min={0}
-                                  placeholder="None"
-                                  value={allotmentDraft.ticketCount}
-                                  onChange={(e) => setAllotmentDraft({ ...allotmentDraft, ticketCount: e.target.value })}
+                                  value={newAllotmentDay.quantity}
+                                  onChange={(e) =>
+                                    setNewAllotmentDay({ ...newAllotmentDay, quantity: e.target.value })
+                                  }
                                 />
                               </div>
-                              <div className="field" style={{ width: 170 }}>
-                                <label>Add a valid date</label>
-                                <input
-                                  type="date"
-                                  value={allotmentDraft.newDate}
-                                  onChange={(e) => setAllotmentDraft({ ...allotmentDraft, newDate: e.target.value })}
-                                />
-                              </div>
-                              <button className="btn btn-secondary btn-sm" onClick={addAllotmentDate}>
-                                Add date
-                              </button>
                               <button
                                 className="btn btn-secondary btn-sm"
-                                disabled={savingAllotment}
-                                onClick={() => saveAllotmentDefaults(t)}
+                                disabled={savingAllotmentDay}
+                                onClick={() => handleSaveAllotmentDay(t.id)}
                               >
-                                Save allotment
+                                Add / update day
                               </button>
                             </div>
-                            {allotmentDraft.dates.length > 0 && (
-                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-                                {allotmentDraft.dates.map((d) => (
-                                  <span
-                                    key={d}
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 6,
-                                      background: 'var(--bg)',
-                                      border: '1px solid var(--border)',
-                                      borderRadius: 100,
-                                      padding: '4px 6px 4px 12px',
-                                      fontSize: 12.5,
-                                    }}
-                                  >
-                                    {d}
-                                    <button
-                                      className="btn btn-secondary btn-sm"
-                                      style={{ padding: '2px 8px' }}
-                                      onClick={() => removeAllotmentDate(d)}
-                                    >
-                                      ×
-                                    </button>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
+                            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+                              Setting a date that's already listed updates its quantity instead of adding a
+                              duplicate.
+                            </p>
                           </div>
                         </td>
                       </tr>

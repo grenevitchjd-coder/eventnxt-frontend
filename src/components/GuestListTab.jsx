@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { api } from '../api'
@@ -71,12 +71,17 @@ export default function GuestListTab({ onToast }) {
     seating_category_id: '',
     allocation_status: 'confirmed',
     party_size: 1,
-    allotment_ticket_count: '',
   })
   const [creatingGuest, setCreatingGuest] = useState(false)
   const [editingGuestId, setEditingGuestId] = useState(null)
   const [guestEditForm, setGuestEditForm] = useState(null)
   const [savingGuest, setSavingGuest] = useState(false)
+
+  // ---- Per-guest ticket allotment override (expandable panel per row) ----
+  const [expandedAllotmentGuestId, setExpandedAllotmentGuestId] = useState(null)
+  const [allotmentDraftRows, setAllotmentDraftRows] = useState([]) // [{date, quantity}]
+  const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
+  const [savingGuestAllotment, setSavingGuestAllotment] = useState(false)
 
   // ---- CSV/Excel import ----
   const fileInputRef = useRef(null)
@@ -137,7 +142,6 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: guestForm.seating_category_id || null,
         allocation_status: guestForm.allocation_status,
         party_size: Number(guestForm.party_size) || 1,
-        allotment_ticket_count: guestForm.allotment_ticket_count === '' ? null : Number(guestForm.allotment_ticket_count),
       })
       onToast(`${guestForm.name} added`)
       setGuestForm({
@@ -147,7 +151,6 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: '',
         allocation_status: 'confirmed',
         party_size: 1,
-        allotment_ticket_count: '',
       })
       loadEventData(loadedEventId)
     } catch (err) {
@@ -166,7 +169,6 @@ export default function GuestListTab({ onToast }) {
       seating_category_id: guest.seating_category_id || '',
       allocation_status: guest.allocation_status,
       party_size: guest.party_size || 1,
-      allotment_ticket_count: guest.allotment_ticket_count ?? '',
     })
   }
 
@@ -180,8 +182,6 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: guestEditForm.seating_category_id || null,
         allocation_status: guestEditForm.allocation_status,
         party_size: Number(guestEditForm.party_size) || 1,
-        allotment_ticket_count:
-          guestEditForm.allotment_ticket_count === '' ? null : Number(guestEditForm.allotment_ticket_count),
       })
       onToast('Saved')
       setEditingGuestId(null)
@@ -201,6 +201,53 @@ export default function GuestListTab({ onToast }) {
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
+    }
+  }
+
+  // ---------- Per-guest ticket allotment override panel ----------
+
+  const toggleAllotmentPanel = (guest) => {
+    if (expandedAllotmentGuestId === guest.id) {
+      setExpandedAllotmentGuestId(null)
+      return
+    }
+    setExpandedAllotmentGuestId(guest.id)
+    setAllotmentDraftRows(guest.ticket_allotment || [])
+    setNewAllotmentDay({ date: '', quantity: '' })
+  }
+
+  const addAllotmentDraftRow = () => {
+    if (!newAllotmentDay.date || newAllotmentDay.quantity === '') return
+    const qty = Number(newAllotmentDay.quantity)
+    setAllotmentDraftRows((prev) => {
+      const withoutThisDate = prev.filter((r) => r.date !== newAllotmentDay.date)
+      return [...withoutThisDate, { date: newAllotmentDay.date, quantity: qty }]
+    })
+    setNewAllotmentDay({ date: '', quantity: '' })
+  }
+
+  const removeAllotmentDraftRow = (date) => {
+    setAllotmentDraftRows((prev) => prev.filter((r) => r.date !== date))
+  }
+
+  const saveGuestAllotment = async (guest) => {
+    setSavingGuestAllotment(true)
+    try {
+      await api.updateGuest(loadedEventId, guest.id, {
+        name: guest.name,
+        email: guest.email,
+        guest_type_id: guest.guest_type_id,
+        seating_category_id: guest.seating_category_id || null,
+        allocation_status: guest.allocation_status,
+        party_size: guest.party_size || 1,
+        ticket_allotment: allotmentDraftRows,
+      })
+      onToast('Ticket allotment saved')
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingGuestAllotment(false)
     }
   }
 
@@ -518,22 +565,14 @@ export default function GuestListTab({ onToast }) {
                   onChange={(e) => setGuestForm({ ...guestForm, party_size: e.target.value })}
                 />
               </div>
-              <div className="field">
-                <label htmlFor="g-ticket-count">Tickets to give out</label>
-                <input
-                  id="g-ticket-count"
-                  type="number"
-                  min={0}
-                  placeholder="Type default"
-                  style={{ width: 120 }}
-                  value={guestForm.allotment_ticket_count}
-                  onChange={(e) => setGuestForm({ ...guestForm, allotment_ticket_count: e.target.value })}
-                />
-              </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingGuest}>
                 Add guest
               </button>
             </form>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+              To give this guest tickets to distribute (models, sponsors), add them first, then use the
+              "Tickets" button on their row below.
+            </p>
           </div>
 
           {/* ---------- Import ---------- */}
@@ -737,68 +776,68 @@ export default function GuestListTab({ onToast }) {
                   </td>
                 </tr>
               ) : (
-                guests.map((g) =>
-                  editingGuestId === g.id ? (
-                    <tr key={g.id}>
-                      <td>
-                        <input
-                          value={guestEditForm.name}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="email"
-                          value={guestEditForm.email}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, email: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.guest_type_id}
-                          onChange={(e) => setGuestEditForm({ ...guestEditForm, guest_type_id: e.target.value })}
-                        >
-                          {guestTypes.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.seating_category_id}
-                          onChange={(e) =>
-                            setGuestEditForm({ ...guestEditForm, seating_category_id: e.target.value })
-                          }
-                        >
-                          <option value="">None</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          style={selectStyle}
-                          value={guestEditForm.allocation_status}
-                          onChange={(e) =>
-                            setGuestEditForm({ ...guestEditForm, allocation_status: e.target.value })
-                          }
-                        >
-                          <option value="confirmed">Confirmed</option>
-                          <option value="pending">Pending</option>
-                          <option value="declined">Declined</option>
-                        </select>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                guests.map((g) => (
+                  <Fragment key={g.id}>
+                    {editingGuestId === g.id ? (
+                      <tr>
+                        <td>
+                          <input
+                            value={guestEditForm.name}
+                            onChange={(e) => setGuestEditForm({ ...guestEditForm, name: e.target.value })}
+                            style={{ width: '100%' }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="email"
+                            value={guestEditForm.email}
+                            onChange={(e) => setGuestEditForm({ ...guestEditForm, email: e.target.value })}
+                            style={{ width: '100%' }}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            style={selectStyle}
+                            value={guestEditForm.guest_type_id}
+                            onChange={(e) => setGuestEditForm({ ...guestEditForm, guest_type_id: e.target.value })}
+                          >
+                            {guestTypes.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            style={selectStyle}
+                            value={guestEditForm.seating_category_id}
+                            onChange={(e) =>
+                              setGuestEditForm({ ...guestEditForm, seating_category_id: e.target.value })
+                            }
+                          >
+                            <option value="">None</option>
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            style={selectStyle}
+                            value={guestEditForm.allocation_status}
+                            onChange={(e) =>
+                              setGuestEditForm({ ...guestEditForm, allocation_status: e.target.value })
+                            }
+                          >
+                            <option value="confirmed">Confirmed</option>
+                            <option value="pending">Pending</option>
+                            <option value="declined">Declined</option>
+                          </select>
+                        </td>
+                        <td>
                           <input
                             type="number"
                             min={1}
@@ -807,91 +846,172 @@ export default function GuestListTab({ onToast }) {
                             value={guestEditForm.party_size}
                             onChange={(e) => setGuestEditForm({ ...guestEditForm, party_size: e.target.value })}
                           />
-                          <input
-                            type="number"
-                            min={0}
-                            placeholder="Give out"
-                            title="Tickets to give out (blank = type default)"
-                            style={{ ...selectStyle, width: 70 }}
-                            value={guestEditForm.allotment_ticket_count}
-                            onChange={(e) =>
-                              setGuestEditForm({ ...guestEditForm, allotment_ticket_count: e.target.value })
-                            }
-                          />
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <a
-                            href={rsvpUrl(g.rsvp_token)}
-                            target="_blank"
-                            rel="noreferrer"
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <a
+                              href={rsvpUrl(g.rsvp_token)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="btn btn-secondary btn-sm"
+                            >
+                              Open
+                            </a>
+                            <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
+                              Copy
+                            </button>
+                          </div>
+                        </td>
+                        <td className="actions-cell">
+                          <button
                             className="btn btn-secondary btn-sm"
+                            disabled={savingGuest}
+                            onClick={() => saveEditGuest(g.id)}
                           >
-                            Open
-                          </a>
-                          <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
-                            Copy
+                            Save
                           </button>
-                        </div>
-                      </td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={savingGuest}
-                          onClick={() => saveEditGuest(g.id)}
-                        >
-                          Save
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingGuestId(null)}>
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={g.id}>
-                      <td>{g.name}</td>
-                      <td className="mono">{g.email}</td>
-                      <td>{guestTypeName(g.guest_type_id)}</td>
-                      <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>
-                      <td>
-                        <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
-                      </td>
-                      <td style={{ fontSize: 12.5 }}>
-                        {g.party_size > 1 && <span>party of {g.party_size}</span>}
-                        {g.allotment_ticket_count > 0 && (
-                          <span style={{ display: 'block', color: 'var(--text-muted)' }}>
-                            gives out {g.allotment_ticket_count}
-                          </span>
-                        )}
-                        {!(g.party_size > 1) && !(g.allotment_ticket_count > 0) && '—'}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <a
-                            href={rsvpUrl(g.rsvp_token)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="btn btn-secondary btn-sm"
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingGuestId(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <td>{g.name}</td>
+                        <td className="mono">{g.email}</td>
+                        <td>{guestTypeName(g.guest_type_id)}</td>
+                        <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>
+                        <td>
+                          <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
+                        </td>
+                        <td style={{ fontSize: 12.5 }}>
+                          {g.party_size > 1 && <span>party of {g.party_size}</span>}
+                          {g.ticket_allotment?.length > 0 && (
+                            <span style={{ display: 'block', color: 'var(--text-muted)' }}>
+                              gives out {g.ticket_allotment.reduce((sum, r) => sum + r.quantity, 0)}
+                            </span>
+                          )}
+                          {!(g.party_size > 1) && !(g.ticket_allotment?.length > 0) && '—'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <a
+                              href={rsvpUrl(g.rsvp_token)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="btn btn-secondary btn-sm"
+                            >
+                              Open
+                            </a>
+                            <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
+                              Copy
+                            </button>
+                          </div>
+                        </td>
+                        <td className="actions-cell">
+                          <button className="btn btn-secondary btn-sm" onClick={() => toggleAllotmentPanel(g)}>
+                            Tickets
+                          </button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    {expandedAllotmentGuestId === g.id && (
+                      <tr>
+                        <td></td>
+                        <td colSpan={7} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                          <div
+                            style={{
+                              background: 'var(--surface-alt)',
+                              borderRadius: 8,
+                              padding: '12px 14px',
+                            }}
                           >
-                            Open
-                          </a>
-                          <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
-                            Copy
-                          </button>
-                        </div>
-                      </td>
-                      <td className="actions-cell">
-                        <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                              {g.name}'s ticket allotment — per-day quantities they get to hand out
+                              themselves. Leave empty to inherit {guestTypeName(g.guest_type_id)}'s default.
+                            </div>
+                            {allotmentDraftRows.length === 0 ? (
+                              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                                No override — inheriting the guest type's default allotment.
+                              </p>
+                            ) : (
+                              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
+                                      Date
+                                    </th>
+                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
+                                      Tickets
+                                    </th>
+                                    <th></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {[...allotmentDraftRows]
+                                    .sort((a, b) => a.date.localeCompare(b.date))
+                                    .map((row) => (
+                                      <tr key={row.date}>
+                                        <td style={{ fontSize: 13.5, padding: '4px 0' }}>{row.date}</td>
+                                        <td style={{ fontSize: 13.5, padding: '4px 0' }} className="mono">
+                                          {row.quantity}
+                                        </td>
+                                        <td style={{ textAlign: 'right' }}>
+                                          <button
+                                            className="btn btn-danger btn-sm"
+                                            onClick={() => removeAllotmentDraftRow(row.date)}
+                                          >
+                                            Remove
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
+                            )}
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                              <div className="field" style={{ width: 170 }}>
+                                <label>Date</label>
+                                <input
+                                  type="date"
+                                  value={newAllotmentDay.date}
+                                  onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
+                                />
+                              </div>
+                              <div className="field" style={{ width: 110 }}>
+                                <label>Tickets</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={newAllotmentDay.quantity}
+                                  onChange={(e) =>
+                                    setNewAllotmentDay({ ...newAllotmentDay, quantity: e.target.value })
+                                  }
+                                />
+                              </div>
+                              <button className="btn btn-secondary btn-sm" onClick={addAllotmentDraftRow}>
+                                Add day
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled={savingGuestAllotment}
+                                onClick={() => saveGuestAllotment(g)}
+                              >
+                                Save allotment
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))
               )}
             </tbody>
           </table>

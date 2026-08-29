@@ -107,7 +107,15 @@ export const api = {
     request(`/events/${eventId}/guest-types/${guestTypeId}/seating-priorities/${priorityId}`, {
       method: 'DELETE',
     }),
-
+  listTicketAllotments: (eventId, guestTypeId) =>
+    request(`/events/${eventId}/guest-types/${guestTypeId}/ticket-allotments`),
+  upsertTicketAllotmentDay: (eventId, guestTypeId, date, quantity) =>
+    request(`/events/${eventId}/guest-types/${guestTypeId}/ticket-allotments/${date}`, {
+      method: 'PUT',
+      body: JSON.stringify({ quantity }),
+    }),
+  deleteTicketAllotmentDay: (eventId, guestTypeId, date) =>
+    request(`/events/${eventId}/guest-types/${guestTypeId}/ticket-allotments/${date}`, { method: 'DELETE' }),
   // Seating categories (per event)
   listSeatingCategories: (eventId) => request(`/events/${eventId}/seating-categories`),
   createSeatingCategory: (eventId, payload) =>
