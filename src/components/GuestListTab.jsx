@@ -71,6 +71,8 @@ export default function GuestListTab({ onToast }) {
     seating_category_id: '',
     allocation_status: 'confirmed',
     party_size: 1,
+    perks: '',
+    comments: '',
   })
   const [creatingGuest, setCreatingGuest] = useState(false)
   const [editingGuestId, setEditingGuestId] = useState(null)
@@ -146,6 +148,8 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: guestForm.seating_category_id || null,
         allocation_status: guestForm.allocation_status,
         party_size: Number(guestForm.party_size) || 1,
+        perks: guestForm.perks || null,
+        comments: guestForm.comments || null,
       })
       onToast(`${guestForm.name} added`)
       setGuestForm({
@@ -155,6 +159,8 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: '',
         allocation_status: 'confirmed',
         party_size: 1,
+        perks: '',
+        comments: '',
       })
       loadEventData(loadedEventId)
     } catch (err) {
@@ -173,6 +179,8 @@ export default function GuestListTab({ onToast }) {
       seating_category_id: guest.seating_category_id || '',
       allocation_status: guest.allocation_status,
       party_size: guest.party_size || 1,
+      perks: guest.perks || '',
+      comments: guest.comments || '',
     })
   }
 
@@ -186,6 +194,8 @@ export default function GuestListTab({ onToast }) {
         seating_category_id: guestEditForm.seating_category_id || null,
         allocation_status: guestEditForm.allocation_status,
         party_size: Number(guestEditForm.party_size) || 1,
+        perks: guestEditForm.perks || null,
+        comments: guestEditForm.comments || null,
       })
       onToast('Saved')
       setEditingGuestId(null)
@@ -596,6 +606,26 @@ export default function GuestListTab({ onToast }) {
                   onChange={(e) => setGuestForm({ ...guestForm, party_size: e.target.value })}
                 />
               </div>
+              <div className="field">
+                <label htmlFor="g-perks">Perks</label>
+                <input
+                  id="g-perks"
+                  placeholder="drinks, gift bag…"
+                  style={{ width: 140 }}
+                  value={guestForm.perks}
+                  onChange={(e) => setGuestForm({ ...guestForm, perks: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="g-comments">Comments</label>
+                <input
+                  id="g-comments"
+                  placeholder="notes…"
+                  style={{ width: 160 }}
+                  value={guestForm.comments}
+                  onChange={(e) => setGuestForm({ ...guestForm, comments: e.target.value })}
+                />
+              </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingGuest}>
                 Add guest
               </button>
@@ -902,14 +932,30 @@ export default function GuestListTab({ onToast }) {
                           </select>
                         </td>
                         <td>
-                          <input
-                            type="number"
-                            min={1}
-                            title="Party size"
-                            style={{ ...selectStyle, width: 55 }}
-                            value={guestEditForm.party_size}
-                            onChange={(e) => setGuestEditForm({ ...guestEditForm, party_size: e.target.value })}
-                          />
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <input
+                              type="number"
+                              min={1}
+                              title="Party size"
+                              style={{ ...selectStyle, width: 45 }}
+                              value={guestEditForm.party_size}
+                              onChange={(e) => setGuestEditForm({ ...guestEditForm, party_size: e.target.value })}
+                            />
+                            <input
+                              title="Perks"
+                              placeholder="Perks"
+                              style={{ ...selectStyle, width: 70 }}
+                              value={guestEditForm.perks}
+                              onChange={(e) => setGuestEditForm({ ...guestEditForm, perks: e.target.value })}
+                            />
+                            <input
+                              title="Comments"
+                              placeholder="Comments"
+                              style={{ ...selectStyle, width: 80 }}
+                              value={guestEditForm.comments}
+                              onChange={(e) => setGuestEditForm({ ...guestEditForm, comments: e.target.value })}
+                            />
+                          </div>
                         </td>
                         <td>
                           <button
@@ -950,7 +996,19 @@ export default function GuestListTab({ onToast }) {
                       </tr>
                     ) : (
                       <tr>
-                        <td>{g.name}</td>
+                        <td>
+                          {g.name}
+                          {(g.perks || g.comments) && (
+                            <span
+                              title={[g.perks && `Perks: ${g.perks}`, g.comments && `Comments: ${g.comments}`]
+                                .filter(Boolean)
+                                .join('\n')}
+                              style={{ marginLeft: 6, cursor: 'help' }}
+                            >
+                              📝
+                            </span>
+                          )}
+                        </td>
                         <td className="mono">{g.email}</td>
                         <td>{guestTypeName(g.guest_type_id)}</td>
                         <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>

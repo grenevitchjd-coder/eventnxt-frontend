@@ -25,6 +25,10 @@ export default function EventWorkspaceTab({ onToast }) {
   const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '' })
   const [savingCat, setSavingCat] = useState(false)
 
+  // ---- Seating summary reconciliation ----
+  const [seatingSummary, setSeatingSummary] = useState(null)
+  const [loadingSummary, setLoadingSummary] = useState(false)
+
   // ---- Guest types (accordion) ----
   const [typeForm, setTypeForm] = useState({ name: '' })
   const [creatingType, setCreatingType] = useState(false)
@@ -42,6 +46,7 @@ export default function EventWorkspaceTab({ onToast }) {
 
   const loadEventData = (id) => {
     setCategories(null)
+    setSeatingSummary(null)
     Promise.all([api.listSeatingCategories(id), api.listGuestTypes(id)])
       .then(([cats, types]) => {
         setCategories(cats)
@@ -53,7 +58,19 @@ export default function EventWorkspaceTab({ onToast }) {
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
+    loadSeatingSummaryFor(id)
   }
+
+  const loadSeatingSummaryFor = (id) => {
+    setLoadingSummary(true)
+    api
+      .getSeatingSummary(id)
+      .then(setSeatingSummary)
+      .catch((e) => onToast(e.message, true))
+      .finally(() => setLoadingSummary(false))
+  }
+
+  const loadSeatingSummary = () => loadSeatingSummaryFor(loadedEventId)
 
   useEffect(() => {
     api
@@ -388,6 +405,56 @@ export default function EventWorkspaceTab({ onToast }) {
               )}
             </tbody>
           </table>
+
+          {/* ---------- Seating Summary — capacity/box office/guest list reconciliation ---------- */}
+          <div className="panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="panel-title" style={{ margin: 0 }}>
+                Seating summary
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={loadSeatingSummary} disabled={loadingSummary}>
+                {loadingSummary ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 14 }}>
+              A live reconciliation across every source — box office sales are matched by ticket type
+              against each category's name. "Confirmed avail." mirrors the real capacity check; "estimated
+              avail." is the more conservative number, also subtracting pending guest-list holds and box
+              office sales.
+            </p>
+            {seatingSummary === null ? (
+              <p style={{ fontSize: 13 }}>Loading…</p>
+            ) : seatingSummary.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No seating categories yet.</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Capacity</th>
+                    <th>Box office</th>
+                    <th>Allotted</th>
+                    <th>Committed</th>
+                    <th>Confirmed avail.</th>
+                    <th>Estimated avail.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seatingSummary.map((row) => (
+                    <tr key={row.category_id}>
+                      <td>{row.category_name}</td>
+                      <td className="mono">{row.capacity}</td>
+                      <td className="mono">{row.box_office}</td>
+                      <td className="mono">{row.allotted}</td>
+                      <td className="mono">{row.committed}</td>
+                      <td className="mono">{row.confirmed_avail}</td>
+                      <td className="mono">{row.estimated_avail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
 
           {/* ---------- Guest types SECOND — accordion, expand to manage priority seating list ---------- */}
           <div className="panel">

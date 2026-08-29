@@ -116,6 +116,7 @@ export const api = {
     }),
   deleteTicketAllotmentDay: (eventId, guestTypeId, date) =>
     request(`/events/${eventId}/guest-types/${guestTypeId}/ticket-allotments/${date}`, { method: 'DELETE' }),
+
   // Seating categories (per event)
   listSeatingCategories: (eventId) => request(`/events/${eventId}/seating-categories`),
   createSeatingCategory: (eventId, payload) =>
@@ -140,7 +141,7 @@ export const api = {
       body: JSON.stringify({ sent }),
     }),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
-  
+
   // Event profile (public-facing content + shareable page)
   getEventProfile: (eventId) => request(`/events/${eventId}/profile`, {}, { allow404: true }),
   saveEventProfile: (eventId, payload) =>
@@ -169,4 +170,67 @@ export const api = {
   uploadGalleryPhoto: (eventId, file) => uploadFile(`/events/${eventId}/profile/photos`, file),
   deleteGalleryPhoto: (eventId, photoId) =>
     request(`/events/${eventId}/profile/photos/${photoId}`, { method: 'DELETE' }),
+
+  // Seating summary reconciliation
+  getSeatingSummary: (eventId) => request(`/events/${eventId}/seating-categories/summary`),
+
+  // Sales platform config
+  getSalesConfig: (eventId) => request(`/events/${eventId}/sales-config`),
+  setSalesConfig: (eventId, platform) =>
+    request(`/events/${eventId}/sales-config`, { method: 'PUT', body: JSON.stringify({ platform }) }),
+
+  // Promo codes
+  listPromoCodes: (eventId) => request(`/events/${eventId}/promo-codes`),
+  createPromoCode: (eventId, payload) =>
+    request(`/events/${eventId}/promo-codes`, { method: 'POST', body: JSON.stringify(payload) }),
+  updatePromoCode: (eventId, codeId, payload) =>
+    request(`/events/${eventId}/promo-codes/${codeId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deletePromoCode: (eventId, codeId) =>
+    request(`/events/${eventId}/promo-codes/${codeId}`, { method: 'DELETE' }),
+
+  // Redemption tiers (event-wide shared thresholds)
+  listRedemptionTiers: (eventId) => request(`/events/${eventId}/redemption-tiers`),
+  createRedemptionTier: (eventId, payload) =>
+    request(`/events/${eventId}/redemption-tiers`, { method: 'POST', body: JSON.stringify(payload) }),
+  deleteRedemptionTier: (eventId, tierId) =>
+    request(`/events/${eventId}/redemption-tiers/${tierId}`, { method: 'DELETE' }),
+
+  // Per-code redemption options (what one code offers at a shared tier)
+  listRedemptionOptions: (eventId, codeId) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/redemption-options`),
+  upsertRedemptionOption: (eventId, codeId, tierId, payload) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/redemption-options/${tierId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteRedemptionOption: (eventId, codeId, tierId) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/redemption-options/${tierId}`, { method: 'DELETE' }),
+
+  // Event-wide default bonus tiers
+  listBonusTiers: (eventId) => request(`/events/${eventId}/bonus-tiers`),
+  createBonusTier: (eventId, payload) =>
+    request(`/events/${eventId}/bonus-tiers`, { method: 'POST', body: JSON.stringify(payload) }),
+  deleteBonusTier: (eventId, tierId) =>
+    request(`/events/${eventId}/bonus-tiers/${tierId}`, { method: 'DELETE' }),
+
+  // Per-code bonus tier override
+  getPromoCodeBonusTiers: (eventId, codeId) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/bonus-tiers`),
+  setPromoCodeBonusTiers: (eventId, codeId, tiers) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/bonus-tiers`, {
+      method: 'PUT',
+      body: JSON.stringify({ tiers }),
+    }),
+  clearPromoCodeBonusTiers: (eventId, codeId) =>
+    request(`/events/${eventId}/promo-codes/${codeId}/bonus-tiers`, { method: 'DELETE' }),
+
+  // Sales
+  listSales: (eventId) => request(`/events/${eventId}/sales`),
+  importSales: (eventId, rows) =>
+    request(`/events/${eventId}/sales/import`, { method: 'POST', body: JSON.stringify({ rows }) }),
+
+  // Organizer payout queue
+  listRewardRedemptions: (eventId) => request(`/events/${eventId}/reward-redemptions`),
+  markRedemptionPaid: (eventId, redemptionId) =>
+    request(`/events/${eventId}/reward-redemptions/${redemptionId}/mark-paid`, { method: 'PATCH' }),
 }

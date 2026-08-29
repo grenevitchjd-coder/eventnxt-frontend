@@ -97,6 +97,111 @@ export default function PublicRSVPPage() {
     }
   }
 
+  const handleRedeem = async (promoCodeId, tierId, choice) => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch(`${API_URL}/public/rsvp/${token}/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promo_code_id: promoCodeId, redemption_tier_id: tierId, choice }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Something went wrong')
+      setInfo(data)
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const renderReferralCodes = (codes) => {
+    if (!codes || codes.length === 0) return null
+    return (
+      <div className="panel" style={{ textAlign: 'left', marginTop: 20 }}>
+        <div className="panel-title">Your referral rewards</div>
+        {codes.map((c) => (
+          <div key={c.promo_code_id} style={{ marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+            <p style={{ margin: '0 0 8px' }}>
+              Code <strong className="mono">{c.code}</strong>
+              {c.reward_type === 'points' && (
+                <span> — {c.points_available ?? 0} point{c.points_available === 1 ? '' : 's'} available</span>
+              )}
+            </p>
+
+            {c.eligible_tiers?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                {c.eligible_tiers.map((t) => (
+                  <div
+                    key={t.redemption_tier_id}
+                    style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}
+                  >
+                    <span style={{ fontSize: 13.5, width: 110 }}>
+                      {t.points_required} pts{t.label ? ` (${t.label})` : ''}
+                    </span>
+                    {t.cash_value != null && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={submitting || !t.affordable}
+                        onClick={() => handleRedeem(c.promo_code_id, t.redemption_tier_id, 'cash')}
+                      >
+                        Redeem for ${t.cash_value}
+                      </button>
+                    )}
+                    {t.ticket_value != null && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={submitting || !t.affordable}
+                        onClick={() => handleRedeem(c.promo_code_id, t.redemption_tier_id, 'ticket')}
+                      >
+                        Redeem for {t.ticket_value} ticket{t.ticket_value === 1 ? '' : 's'}
+                      </button>
+                    )}
+                    {!t.affordable && (
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>not enough points yet</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {c.redemption_history?.length > 0 && (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Redeemed</th>
+                    <th>Points spent</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.redemption_history.map((h, i) => (
+                    <tr key={i}>
+                      <td>
+                        {h.choice === 'cash' ? `$${h.cash_value} cash` : `${h.ticket_value} ticket(s)`}
+                      </td>
+                      <td className="mono">{h.points_spent}</td>
+                      <td>
+                        {h.choice === 'cash' ? (
+                          <span className={`pill pill-${h.payout_status === 'paid' ? 'confirmed' : 'pending'}`}>
+                            {h.payout_status}
+                          </span>
+                        ) : (
+                          <span className="pill pill-confirmed">fulfilled</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="public-event-page">
@@ -158,6 +263,7 @@ export default function PublicRSVPPage() {
             </p>
           )}
           {submitError && <p style={{ color: 'var(--danger, #c55)', marginTop: 16 }}>{submitError}</p>}
+          {renderReferralCodes(info.referral_codes)}
         </div>
       </div>
     )
@@ -312,6 +418,8 @@ export default function PublicRSVPPage() {
             </button>
           </div>
         )}
+
+        {renderReferralCodes(info.referral_codes)}
       </div>
     </div>
   )
