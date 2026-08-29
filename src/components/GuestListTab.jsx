@@ -90,9 +90,12 @@ export default function GuestListTab({ onToast }) {
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0 })
 
   // ---- Export ----
-  const [exportTypeFilter, setExportTypeFilter] = useState('')
-  const [exportStatusFilter, setExportStatusFilter] = useState('')
-  const [exportSentFilter, setExportSentFilter] = useState('')
+  // ---- Filters (govern both the visible table and CSV export) ----
+  const [filterSearch, setFilterSearch] = useState('')
+  const [filterType, setFilterType] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterDay, setFilterDay] = useState('')
+  const [filterSent, setFilterSent] = useState('')
 
   const loadEventData = (id) => {
     setCategories(null)
@@ -283,20 +286,13 @@ export default function GuestListTab({ onToast }) {
   }
 
   const handleExportGuests = () => {
-    const filtered = guests.filter((g) => {
-      if (exportTypeFilter && g.guest_type_id !== exportTypeFilter) return false
-      if (exportStatusFilter && g.allocation_status !== exportStatusFilter) return false
-      if (exportSentFilter === 'sent' && !g.link_sent_at) return false
-      if (exportSentFilter === 'not_sent' && g.link_sent_at) return false
-      return true
-    })
-    if (filtered.length === 0) {
-      onToast('No guests match that filter', true)
+    if (visibleGuests.length === 0) {
+      onToast('No guests match the current filters', true)
       return
     }
     const csv = Papa.unparse({
       fields: ['Name', 'Email', 'Guest Type', 'Seating Category', 'Status', 'Party Size', 'Sent', 'RSVP Link'],
-      data: filtered.map((g) => [
+      data: visibleGuests.map((g) => [
         g.name,
         g.email,
         guestTypeName(g.guest_type_id),
@@ -458,6 +454,26 @@ export default function GuestListTab({ onToast }) {
       onToast('Could not copy — your browser may have blocked clipboard access', true)
     }
   }
+
+  // Every distinct day actually in use across the guest list, so the day
+  // filter always reflects real event days without needing a separate
+  // fetch of configured allotment dates.
+  const availableDays = guests
+    ? [...new Set(guests.map((g) => g.visit_date).filter(Boolean))].sort()
+    : []
+
+  const visibleGuests = (guests || []).filter((g) => {
+    if (filterType && g.guest_type_id !== filterType) return false
+    if (filterStatus && g.allocation_status !== filterStatus) return false
+    if (filterDay && g.visit_date !== filterDay) return false
+    if (filterSent === 'sent' && !g.link_sent_at) return false
+    if (filterSent === 'not_sent' && g.link_sent_at) return false
+    if (filterSearch) {
+      const q = filterSearch.toLowerCase()
+      if (!g.name.toLowerCase().includes(q) && !g.email.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
 
   return (
     <>
@@ -736,17 +752,25 @@ export default function GuestListTab({ onToast }) {
             </div>
           )}
 
-          {/* ---------- Existing guest list ---------- */}
+          {/* ---------- Master guest list — filter, search, export ---------- */}
           <div className="panel">
-            <div className="panel-title">Download guest list</div>
+            <div className="panel-title">Guest list</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
-              Exports name, email, type, seating, status, party size, and each guest's full RSVP link — ready
-              to paste into an email.
+              Search or filter to find someone quickly — the same filters apply to the CSV download below.
             </p>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div className="field" style={{ width: 180 }}>
+              <div className="field" style={{ width: 220 }}>
+                <label>Search</label>
+                <input
+                  type="text"
+                  placeholder="Name or email…"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ width: 170 }}>
                 <label>Guest type</label>
-                <select value={exportTypeFilter} onChange={(e) => setExportTypeFilter(e.target.value)}>
+                <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
                   <option value="">All types</option>
                   {guestTypes.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -755,18 +779,31 @@ export default function GuestListTab({ onToast }) {
                   ))}
                 </select>
               </div>
-              <div className="field" style={{ width: 160 }}>
+              <div className="field" style={{ width: 150 }}>
                 <label>Status</label>
-                <select value={exportStatusFilter} onChange={(e) => setExportStatusFilter(e.target.value)}>
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                   <option value="">All statuses</option>
                   <option value="confirmed">Confirmed</option>
                   <option value="pending">Pending</option>
                   <option value="declined">Declined</option>
                 </select>
               </div>
-              <div className="field" style={{ width: 150 }}>
+              {availableDays.length > 0 && (
+                <div className="field" style={{ width: 160 }}>
+                  <label>Day</label>
+                  <select value={filterDay} onChange={(e) => setFilterDay(e.target.value)}>
+                    <option value="">All days</option>
+                    {availableDays.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="field" style={{ width: 140 }}>
                 <label>Sent</label>
-                <select value={exportSentFilter} onChange={(e) => setExportSentFilter(e.target.value)}>
+                <select value={filterSent} onChange={(e) => setFilterSent(e.target.value)}>
                   <option value="">All</option>
                   <option value="sent">Sent only</option>
                   <option value="not_sent">Not yet sent</option>
@@ -776,6 +813,9 @@ export default function GuestListTab({ onToast }) {
                 Download CSV
               </button>
             </div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
+              Showing {visibleGuests.length} of {guests.length} guest{guests.length === 1 ? '' : 's'}
+            </p>
           </div>
 
           <table className="data-table">
@@ -793,14 +833,14 @@ export default function GuestListTab({ onToast }) {
               </tr>
             </thead>
             <tbody>
-              {guests.length === 0 ? (
+              {visibleGuests.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="empty-state">
-                    No guests yet.
+                    {guests.length === 0 ? 'No guests yet.' : 'No guests match the current filters.'}
                   </td>
                 </tr>
               ) : (
-                guests.map((g) => (
+                visibleGuests.map((g) => (
                   <Fragment key={g.id}>
                     {editingGuestId === g.id ? (
                       <tr>
