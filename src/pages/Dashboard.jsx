@@ -4,11 +4,13 @@ import { api, clearToken } from '../api'
 import HomeTab from '../components/HomeTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
 import GuestListTab from '../components/GuestListTab'
+import RSVPManagementTab from '../components/RSVPManagementTab'
 
 const TABS = [
   { key: 'home', label: 'Home' },
   { key: 'workspace', label: 'Event workspace' },
   { key: 'guests', label: 'Guest list' },
+  { key: 'rsvp', label: 'RSVP management' },
 ]
 
 export default function Dashboard() {
@@ -58,10 +60,11 @@ export default function Dashboard() {
         </div>
       </aside>
 
-            <main className="main">
+      <main className="main">
         {tab === 'home' && <HomeTab onToast={showToast} />}
         {tab === 'workspace' && <EventWorkspaceTab onToast={showToast} />}
         {tab === 'guests' && <GuestListTab onToast={showToast} />}
+        {tab === 'rsvp' && <RSVPManagementTab onToast={showToast} />}
       </main>
 
       {toast && <div className={`toast ${toast.isError ? 'toast-error' : ''}`}>{toast.message}</div>}
