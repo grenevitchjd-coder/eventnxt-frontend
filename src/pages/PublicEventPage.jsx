@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { loadGoogleFont, SocialIcon, platformLabel } from '../socialAndFonts'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
 
@@ -44,6 +45,8 @@ function formatDailyTime(value) {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+const OVERLAY_LOGO_POSITIONS = ['top-left', 'top-center', 'top-right']
+
 export default function PublicEventPage() {
   const { slug } = useParams()
   const [profile, setProfile] = useState(undefined) // undefined = loading, null = not found
@@ -58,6 +61,13 @@ export default function PublicEventPage() {
       .then(setProfile)
       .catch(() => setError(true))
   }, [slug])
+
+  // Load the chosen display font once the profile arrives. Memoized inside
+  // loadGoogleFont, so re-renders are harmless. No font_family = nothing
+  // to load — the page already ships Fraunces, its original default.
+  useEffect(() => {
+    if (profile?.font_family) loadGoogleFont(profile.font_family)
+  }, [profile])
 
   if (error) {
     return (
@@ -81,15 +91,79 @@ export default function PublicEventPage() {
   const dailySchedule = profile.daily_schedule || []
   const specialSchedule = profile.schedule || []
 
+  // The chosen display font, applied inline to the title and section
+  // headings only — body text stays in the site's body font. Null falls
+  // through to var(--font-display) (Fraunces), the page's original look.
+  const displayFont = profile.font_family
+    ? { fontFamily: `'${profile.font_family}', var(--font-display)` }
+    : undefined
+
+  // Which part of the banner survives the 42vh crop. Null = center,
+  // today's behavior.
+  const bannerPosition =
+    { top: 'center top', bottom: 'center bottom' }[profile.banner_focus] || 'center'
+
+  // Logo placement. Overlay positions only make sense on top of a banner —
+  // if a position is set but no banner exists, fall back to the default
+  // in-flow centered logo rather than absolutely positioning into nothing.
+  const hasBanner = Boolean(profile.banner_photo_url)
+  const requestedLogoPosition = profile.logo_position || 'centered'
+  let logoMode = 'centered'
+  if (requestedLogoPosition === 'hidden') {
+    logoMode = 'hidden'
+  } else if (OVERLAY_LOGO_POSITIONS.includes(requestedLogoPosition) && hasBanner) {
+    logoMode = requestedLogoPosition
+  }
+
   return (
     <div className="public-event-page">
-      {profile.banner_photo_url && (
-        <div className="public-event-hero" style={{ backgroundImage: `url(${profile.banner_photo_url})` }} />
+      {hasBanner && (
+        <div
+          className="public-event-hero"
+          style={{
+            backgroundImage: `url(${profile.banner_photo_url})`,
+            backgroundPosition: bannerPosition,
+          }}
+        >
+          {profile.logo_url && OVERLAY_LOGO_POSITIONS.includes(logoMode) && (
+            <img
+              src={profile.logo_url}
+              alt=""
+              className={`public-event-logo public-event-logo-overlay public-event-logo-${logoMode}`}
+            />
+          )}
+        </div>
       )}
-      <div className="public-event-content">
-        {profile.logo_url && <img src={profile.logo_url} alt="" className="public-event-logo" />}
 
-        <h1 className="public-event-title">{profile.title}</h1>
+      {/* Social icon bar — its own strip below the banner, right-aligned to
+          the content column. Deliberately NOT overlaid on the banner photo:
+          icon contrast would be at the mercy of whatever image the
+          organizer uploads. */}
+      {socialLinks.length > 0 && (
+        <div className="public-event-social-bar">
+          {socialLinks.map((link, i) => (
+            <a
+              key={i}
+              href={link.value}
+              target="_blank"
+              rel="noreferrer"
+              title={link.label || platformLabel(link.value)}
+              aria-label={link.label || platformLabel(link.value)}
+            >
+              <SocialIcon url={link.value} />
+            </a>
+          ))}
+        </div>
+      )}
+
+      <div className="public-event-content">
+        {profile.logo_url && logoMode === 'centered' && (
+          <img src={profile.logo_url} alt="" className="public-event-logo" />
+        )}
+
+        <h1 className="public-event-title" style={displayFont}>
+          {profile.title}
+        </h1>
         {/* Dates are always their own thing on the page — the event's real
             date range, shown once, separate from any schedule detail. */}
         {dateRange && <p className="public-event-dates">{dateRange}</p>}
@@ -107,9 +181,20 @@ export default function PublicEventPage() {
           </a>
         )}
 
+        {profile.about_us && (
+          <div className="public-event-section">
+            <h2 className="public-event-section-title" style={displayFont}>
+              About Us
+            </h2>
+            <p className="public-event-about">{profile.about_us}</p>
+          </div>
+        )}
+
         {dailySchedule.length > 0 && (
           <div className="public-event-section">
-            <h2 className="public-event-section-title">Daily Schedule</h2>
+            <h2 className="public-event-section-title" style={displayFont}>
+              Daily Schedule
+            </h2>
             <ul className="public-event-schedule">
               {dailySchedule.map((item, i) => (
                 <li key={i}>
@@ -123,7 +208,9 @@ export default function PublicEventPage() {
 
         {specialSchedule.length > 0 && (
           <div className="public-event-section">
-            <h2 className="public-event-section-title">Special Dates</h2>
+            <h2 className="public-event-section-title" style={displayFont}>
+              Special Dates
+            </h2>
             <ul className="public-event-schedule">
               {specialSchedule.map((item, i) => (
                 <li key={i}>
@@ -145,26 +232,17 @@ export default function PublicEventPage() {
           </div>
         )}
 
-        {(contactLinks.length > 0 || socialLinks.length > 0) && (
+        {/* Contact emails keep their original spot and plain-text render —
+            only socials moved up into the icon bar. */}
+        {contactLinks.length > 0 && (
           <div className="public-event-section">
-            {contactLinks.length > 0 && (
-              <div className="public-event-contacts">
-                {contactLinks.map((link, i) => (
-                  <a key={i} href={`mailto:${link.value}`}>
-                    {link.label}: {link.value}
-                  </a>
-                ))}
-              </div>
-            )}
-            {socialLinks.length > 0 && (
-              <div className="public-event-socials">
-                {socialLinks.map((link, i) => (
-                  <a key={i} href={link.value} target="_blank" rel="noreferrer">
-                    {link.label}
-                  </a>
-                ))}
-              </div>
-            )}
+            <div className="public-event-contacts">
+              {contactLinks.map((link, i) => (
+                <a key={i} href={`mailto:${link.value}`}>
+                  {link.label}: {link.value}
+                </a>
+              ))}
+            </div>
           </div>
         )}
       </div>

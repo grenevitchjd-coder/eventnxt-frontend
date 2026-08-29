@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, getNewEventUrl } from '../api'
+import { FONT_OPTIONS, loadGoogleFont, platformLabel, SocialIcon } from '../socialAndFonts'
 
 const MAX_GALLERY_PHOTOS = 3
 
@@ -35,15 +36,27 @@ export default function HomeTab({ onToast }) {
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [profile, setProfile] = useState(null)
 
-  const [form, setForm] = useState({ title: '', description: '', address: '', external_ticket_url: '', slug: '' })
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    address: '',
+    external_ticket_url: '',
+    slug: '',
+    font_family: '',
+    about_us: '',
+  })
   const [saving, setSaving] = useState(false)
   const [uploadingBanner, setUploadingBanner] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [publishing, setPublishing] = useState(false)
 
   const [links, setLinks] = useState([])
-  const [linkForm, setLinkForm] = useState({ kind: 'contact', label: '', value: '' })
-  const [addingLink, setAddingLink] = useState(false)
+  // Contacts and socials are two genuinely different things — separate
+  // forms, no shared kind-dropdown to mis-file an Instagram URL as an email.
+  const [contactForm, setContactForm] = useState({ label: '', value: '' })
+  const [addingContact, setAddingContact] = useState(false)
+  const [socialForm, setSocialForm] = useState({ label: '', value: '' })
+  const [addingSocial, setAddingSocial] = useState(false)
 
   const [schedule, setSchedule] = useState([])
   const [scheduleForm, setScheduleForm] = useState({ label: '', is_recurring: false, event_datetime: '', time_of_day: '' })
@@ -85,7 +98,10 @@ export default function HomeTab({ onToast }) {
           address: p?.address || '',
           external_ticket_url: p?.external_ticket_url || '',
           slug: p?.slug || '',
+          font_family: p?.font_family || '',
+          about_us: p?.about_us || '',
         })
+        if (p?.font_family) loadGoogleFont(p.font_family)
         if (p) loadProfileExtras(event.id)
       })
       .catch((e) => onToast(e.message, true))
@@ -96,19 +112,29 @@ export default function HomeTab({ onToast }) {
     setProfile(null)
   }
 
+  // Always send every field together — the backend does a full replace,
+  // not a partial patch, so omitting a field would wipe it. That includes
+  // logo_position / banner_focus, which live on the saved profile (they
+  // have their own immediate-save dropdowns) rather than in the form —
+  // the main Save must carry them along or it would reset them.
+  const buildFullPayload = (overrides = {}) => ({
+    title: form.title,
+    description: form.description || null,
+    address: form.address || null,
+    external_ticket_url: form.external_ticket_url || null,
+    slug: form.slug || null,
+    font_family: form.font_family || null,
+    about_us: form.about_us || null,
+    logo_position: profile?.logo_position || null,
+    banner_focus: profile?.banner_focus || null,
+    ...overrides,
+  })
+
   const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
     try {
-      // Always send every field together — the backend does a full
-      // replace, not a partial patch, so omitting a field would wipe it.
-      const saved = await api.saveEventProfile(selectedEvent.id, {
-        title: form.title,
-        description: form.description || null,
-        address: form.address || null,
-        external_ticket_url: form.external_ticket_url || null,
-        slug: form.slug || null,
-      })
+      const saved = await api.saveEventProfile(selectedEvent.id, buildFullPayload())
       const isFirstSave = !profile
       setProfile(saved)
       setForm({ ...form, slug: saved.slug })
@@ -118,6 +144,37 @@ export default function HomeTab({ onToast }) {
       onToast(err.message, true)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Logo position and banner focus save immediately on change (they only
+  // appear once the relevant image is uploaded, i.e. once a profile
+  // definitely exists — no draft state to worry about).
+  const handleLogoPositionChange = async (e) => {
+    const value = e.target.value
+    try {
+      const saved = await api.saveEventProfile(
+        selectedEvent.id,
+        buildFullPayload({ logo_position: value || null })
+      )
+      setProfile(saved)
+      onToast('Logo position saved')
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
+  const handleBannerFocusChange = async (e) => {
+    const value = e.target.value
+    try {
+      const saved = await api.saveEventProfile(
+        selectedEvent.id,
+        buildFullPayload({ banner_focus: value || null })
+      )
+      setProfile(saved)
+      onToast('Banner focus saved')
+    } catch (err) {
+      onToast(err.message, true)
     }
   }
 
@@ -170,18 +227,33 @@ export default function HomeTab({ onToast }) {
     }
   }
 
-  const handleAddLink = async (e) => {
+  const handleAddContact = async (e) => {
     e.preventDefault()
-    setAddingLink(true)
+    setAddingContact(true)
     try {
-      const created = await api.createProfileLink(selectedEvent.id, linkForm)
+      const created = await api.createProfileLink(selectedEvent.id, { kind: 'contact', ...contactForm })
       setLinks([...links, created])
-      setLinkForm({ kind: linkForm.kind, label: '', value: '' })
+      setContactForm({ label: '', value: '' })
       onToast(`"${created.label}" added`)
     } catch (err) {
       onToast(err.message, true)
     } finally {
-      setAddingLink(false)
+      setAddingContact(false)
+    }
+  }
+
+  const handleAddSocial = async (e) => {
+    e.preventDefault()
+    setAddingSocial(true)
+    try {
+      const created = await api.createProfileLink(selectedEvent.id, { kind: 'social', ...socialForm })
+      setLinks([...links, created])
+      setSocialForm({ label: '', value: '' })
+      onToast(`"${created.label}" added`)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setAddingSocial(false)
     }
   }
 
@@ -344,9 +416,63 @@ export default function HomeTab({ onToast }) {
               />
               {profile && (
                 <p className="mono" style={{ marginTop: 6, fontSize: 12 }}>
-                  {window.location.origin}/e/{profile.slug}
+                  {window.location.origin}/e/{profile.slug}{' '}
+                  <a
+                    href={`/e/${profile.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'var(--accent-dark)', fontWeight: 600, whiteSpace: 'nowrap' }}
+                  >
+                    Preview ↗
+                  </a>
                 </p>
               )}
+              {profile && !profile.is_published && (
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  Note: the page shows "not available" until you publish — unpublished pages are hidden
+                  from everyone, on purpose. Publish, preview, and unpublish if it's not ready.
+                </p>
+              )}
+            </div>
+            <div className="field" style={{ marginBottom: 14 }}>
+              <label htmlFor="p-font">Display font (title &amp; section headings)</label>
+              <select
+                id="p-font"
+                style={{ ...inputStyle, width: '100%' }}
+                value={form.font_family}
+                onChange={(e) => {
+                  const family = e.target.value
+                  if (family) loadGoogleFont(family)
+                  setForm({ ...form, font_family: family })
+                }}
+              >
+                {FONT_OPTIONS.map((f) => (
+                  <option key={f.family} value={f.family === 'Fraunces' ? '' : f.family}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+              <p
+                style={{
+                  fontFamily: `'${form.font_family || 'Fraunces'}', serif`,
+                  fontSize: 24,
+                  fontWeight: 700,
+                  margin: '10px 0 0',
+                }}
+              >
+                {form.title || 'Sample Event Title'}
+              </p>
+            </div>
+            <div className="field" style={{ marginBottom: 14 }}>
+              <label htmlFor="p-about">About Us (optional — its own section near the bottom of the page)</label>
+              <textarea
+                id="p-about"
+                rows={4}
+                style={{ ...inputStyle, width: '100%' }}
+                placeholder="Who you are, your story, what guests can expect…"
+                value={form.about_us}
+                onChange={(e) => setForm({ ...form, about_us: e.target.value })}
+              />
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -6, marginBottom: 14 }}>
               Dates ({dateRange || 'not set yet'}) come from Events360 automatically — to change them, update
@@ -377,7 +503,34 @@ export default function HomeTab({ onToast }) {
                 onChange={handleLogoChange}
                 disabled={uploadingLogo}
               />
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                Suggested: roughly square, ~400×400px, PNG with a transparent background. It displays
+                small (56px tall), so a clean simple mark beats a detailed one.
+              </p>
               {uploadingLogo && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Uploading…</p>}
+              {profile.logo_url && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="p-logo-position">Placement on the public page (saves immediately)</label>
+                  <select
+                    id="p-logo-position"
+                    style={inputStyle}
+                    value={profile.logo_position || ''}
+                    onChange={handleLogoPositionChange}
+                  >
+                    <option value="">Centered above the title (default)</option>
+                    <option value="top-left">Top-left, on the banner</option>
+                    <option value="top-center">Top-center, on the banner</option>
+                    <option value="top-right">Top-right, on the banner</option>
+                    <option value="hidden">Hidden — don't show the logo</option>
+                  </select>
+                  {['top-left', 'top-center', 'top-right'].includes(profile.logo_position) &&
+                    !profile.banner_photo_url && (
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                        No banner photo yet — until one is uploaded, the logo will show centered instead.
+                      </p>
+                    )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -401,7 +554,28 @@ export default function HomeTab({ onToast }) {
                 onChange={handleBannerChange}
                 disabled={uploadingBanner}
               />
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                Suggested: wide landscape, ~1600×675px. It displays as a full-width strip and gets
+                cropped top/bottom to fit — keep faces and key details away from the very edges.
+              </p>
               {uploadingBanner && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Uploading…</p>}
+              {profile.banner_photo_url && (
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label htmlFor="p-banner-focus">
+                    Crop focus — which part of the photo to keep visible (saves immediately)
+                  </label>
+                  <select
+                    id="p-banner-focus"
+                    style={inputStyle}
+                    value={profile.banner_focus || ''}
+                    onChange={handleBannerFocusChange}
+                  >
+                    <option value="">Center (default)</option>
+                    <option value="top">Top of the photo</option>
+                    <option value="bottom">Bottom of the photo</option>
+                  </select>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -442,6 +616,10 @@ export default function HomeTab({ onToast }) {
                     onChange={handleGalleryPhotoChange}
                     disabled={uploadingGalleryPhoto}
                   />
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                    Suggested: at least ~800×800px. These display as uniform square-ish tiles, cropped to
+                    the center.
+                  </p>
                   {uploadingGalleryPhoto && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Uploading…</p>}
                 </>
               ) : (
@@ -454,74 +632,147 @@ export default function HomeTab({ onToast }) {
         </div>
 
         <div className="panel">
-          <div className="panel-title">Contacts &amp; socials</div>
+          <div className="panel-title">Contact emails</div>
           {!profile ? (
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Save the details above first.</p>
           ) : (
             <>
-              {links.length > 0 && (
+              {links.filter((l) => l.kind === 'contact').length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  {links.map((link) => (
-                    <div
-                      key={link.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '8px 0',
-                        borderBottom: '1px solid var(--border)',
-                        fontSize: 13.5,
-                      }}
-                    >
-                      <span>
-                        <strong>{link.label}</strong> ({link.kind}) — {link.value}
-                      </span>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDeleteLink(link)}>
-                        Remove
-                      </button>
-                    </div>
-                  ))}
+                  {links
+                    .filter((l) => l.kind === 'contact')
+                    .map((link) => (
+                      <div
+                        key={link.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 0',
+                          borderBottom: '1px solid var(--border)',
+                          fontSize: 13.5,
+                        }}
+                      >
+                        <span>
+                          <strong>{link.label}</strong> — {link.value}
+                        </span>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDeleteLink(link)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                 </div>
               )}
-              <form className="inline-form" onSubmit={handleAddLink}>
+              <form className="inline-form" onSubmit={handleAddContact}>
                 <div className="field">
-                  <label htmlFor="link-kind">Type</label>
-                  <select
-                    id="link-kind"
-                    style={inputStyle}
-                    value={linkForm.kind}
-                    onChange={(e) => setLinkForm({ ...linkForm, kind: e.target.value })}
-                  >
-                    <option value="contact">Contact email</option>
-                    <option value="social">Social link</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="link-label">Label</label>
+                  <label htmlFor="contact-label">Label</label>
                   <input
-                    id="link-label"
+                    id="contact-label"
                     required
-                    placeholder={linkForm.kind === 'contact' ? 'Sponsorships' : 'Instagram'}
-                    value={linkForm.label}
-                    onChange={(e) => setLinkForm({ ...linkForm, label: e.target.value })}
+                    placeholder="Sponsorships"
+                    value={contactForm.label}
+                    onChange={(e) => setContactForm({ ...contactForm, label: e.target.value })}
                   />
                 </div>
                 <div className="field" style={{ flex: 1 }}>
-                  <label htmlFor="link-value">{linkForm.kind === 'contact' ? 'Email' : 'URL'}</label>
+                  <label htmlFor="contact-value">Email</label>
                   <input
-                    id="link-value"
-                    type={linkForm.kind === 'contact' ? 'email' : 'url'}
+                    id="contact-value"
+                    type="email"
                     required
                     style={{ width: '100%' }}
-                    placeholder={linkForm.kind === 'contact' ? 'sponsors@example.com' : 'https://'}
-                    value={linkForm.value}
-                    onChange={(e) => setLinkForm({ ...linkForm, value: e.target.value })}
+                    placeholder="sponsors@example.com"
+                    value={contactForm.value}
+                    onChange={(e) => setContactForm({ ...contactForm, value: e.target.value })}
                   />
                 </div>
-                <button className="btn btn-secondary" type="submit" disabled={addingLink}>
+                <button className="btn btn-secondary" type="submit" disabled={addingContact}>
                   Add
                 </button>
               </form>
+            </>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">Social links</div>
+          {!profile ? (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Save the details above first.</p>
+          ) : (
+            <>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 12 }}>
+                These show as icon buttons at the top of the public page — the platform is detected
+                automatically from the URL.
+              </p>
+              {links.filter((l) => l.kind === 'social').length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  {links
+                    .filter((l) => l.kind === 'social')
+                    .map((link) => (
+                      <div
+                        key={link.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 0',
+                          borderBottom: '1px solid var(--border)',
+                          fontSize: 13.5,
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <SocialIcon url={link.value} size={16} />
+                          <strong>{link.label}</strong> — {link.value}
+                        </span>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDeleteLink(link)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
+              <form className="inline-form" onSubmit={handleAddSocial}>
+                <div className="field">
+                  <label htmlFor="social-label">Label</label>
+                  <input
+                    id="social-label"
+                    required
+                    placeholder="Instagram"
+                    value={socialForm.label}
+                    onChange={(e) => setSocialForm({ ...socialForm, label: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label htmlFor="social-value">URL</label>
+                  <input
+                    id="social-value"
+                    type="url"
+                    required
+                    style={{ width: '100%' }}
+                    placeholder="https://instagram.com/yourevent"
+                    value={socialForm.value}
+                    onChange={(e) => setSocialForm({ ...socialForm, value: e.target.value })}
+                  />
+                </div>
+                <button className="btn btn-secondary" type="submit" disabled={addingSocial}>
+                  Add
+                </button>
+              </form>
+              {socialForm.value && (
+                <p
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 12.5,
+                    color: 'var(--text-muted)',
+                    marginTop: 10,
+                  }}
+                >
+                  <SocialIcon url={socialForm.value} size={16} />
+                  Detected: {platformLabel(socialForm.value)}
+                </p>
+              )}
             </>
           )}
         </div>

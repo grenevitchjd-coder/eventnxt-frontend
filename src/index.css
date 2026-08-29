@@ -421,6 +421,7 @@ a:focus-visible {
 }
 
 .public-event-hero {
+  position: relative; /* positioning context for the optional overlay logo */
   width: 100%;
   height: 42vh;
   min-height: 260px;
@@ -569,4 +570,67 @@ a:focus-visible {
   border: 1px solid var(--border);
   border-radius: 100px;
   padding: 6px 16px;
+}
+/* ---------- Public page personalization (added with font/logo/socials/About Us) ---------- */
+
+/* Logo overlaid on the banner photo — only used when a banner exists and
+   an overlay position is chosen; the default centered in-flow logo is
+   still .public-event-logo, unchanged. */
+.public-event-logo-overlay {
+  position: absolute;
+  top: 20px;
+  margin: 0;
+}
+
+.public-event-logo-top-left {
+  left: 24px;
+}
+
+.public-event-logo-top-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.public-event-logo-top-right {
+  right: 24px;
+}
+
+/* Social icon bar — its own strip below the banner, right-aligned to the
+   same column width as the content. Deliberately NOT overlaid on the
+   banner photo, so icon contrast never depends on the uploaded image. */
+.public-event-social-bar {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 24px 0;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.public-event-social-bar a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 100px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.public-event-social-bar a:hover {
+  color: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+/* About Us body text — same rhythm as the description, but left-aligned
+   inside its section like other section content. */
+.public-event-about {
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
 }
