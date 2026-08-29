@@ -134,8 +134,13 @@ export const api = {
     request(`/events/${eventId}/guests`, { method: 'POST', body: JSON.stringify(payload) }),
   updateGuest: (eventId, guestId, payload) =>
     request(`/events/${eventId}/guests/${guestId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  setGuestSentStatus: (eventId, guestId, sent) =>
+    request(`/events/${eventId}/guests/${guestId}/sent-status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sent }),
+    }),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
-
+  
   // Event profile (public-facing content + shareable page)
   getEventProfile: (eventId) => request(`/events/${eventId}/profile`, {}, { allow404: true }),
   saveEventProfile: (eventId, payload) =>

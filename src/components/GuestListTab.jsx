@@ -92,6 +92,7 @@ export default function GuestListTab({ onToast }) {
   // ---- Export ----
   const [exportTypeFilter, setExportTypeFilter] = useState('')
   const [exportStatusFilter, setExportStatusFilter] = useState('')
+  const [exportSentFilter, setExportSentFilter] = useState('')
 
   const loadEventData = (id) => {
     setCategories(null)
@@ -251,6 +252,17 @@ export default function GuestListTab({ onToast }) {
     }
   }
 
+  // ---------- Sent-link tracking ----------
+
+  const toggleSentStatus = async (guest) => {
+    try {
+      await api.setGuestSentStatus(loadedEventId, guest.id, !guest.link_sent_at)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
   // ---------- CSV / Excel import ----------
 
   const downloadTemplate = () => {
@@ -274,6 +286,8 @@ export default function GuestListTab({ onToast }) {
     const filtered = guests.filter((g) => {
       if (exportTypeFilter && g.guest_type_id !== exportTypeFilter) return false
       if (exportStatusFilter && g.allocation_status !== exportStatusFilter) return false
+      if (exportSentFilter === 'sent' && !g.link_sent_at) return false
+      if (exportSentFilter === 'not_sent' && g.link_sent_at) return false
       return true
     })
     if (filtered.length === 0) {
@@ -281,7 +295,7 @@ export default function GuestListTab({ onToast }) {
       return
     }
     const csv = Papa.unparse({
-      fields: ['Name', 'Email', 'Guest Type', 'Seating Category', 'Status', 'Party Size', 'RSVP Link'],
+      fields: ['Name', 'Email', 'Guest Type', 'Seating Category', 'Status', 'Party Size', 'Sent', 'RSVP Link'],
       data: filtered.map((g) => [
         g.name,
         g.email,
@@ -289,6 +303,7 @@ export default function GuestListTab({ onToast }) {
         g.seating_category_id ? categoryName(g.seating_category_id) : '',
         g.allocation_status,
         g.party_size,
+        g.link_sent_at ? 'yes' : 'no',
         rsvpUrl(g.rsvp_token),
       ]),
     })
@@ -749,6 +764,14 @@ export default function GuestListTab({ onToast }) {
                   <option value="declined">Declined</option>
                 </select>
               </div>
+              <div className="field" style={{ width: 150 }}>
+                <label>Sent</label>
+                <select value={exportSentFilter} onChange={(e) => setExportSentFilter(e.target.value)}>
+                  <option value="">All</option>
+                  <option value="sent">Sent only</option>
+                  <option value="not_sent">Not yet sent</option>
+                </select>
+              </div>
               <button className="btn btn-secondary" onClick={handleExportGuests}>
                 Download CSV
               </button>
@@ -764,6 +787,7 @@ export default function GuestListTab({ onToast }) {
                 <th>Category</th>
                 <th>Status</th>
                 <th>Tickets</th>
+                <th>Sent</th>
                 <th>RSVP link</th>
                 <th></th>
               </tr>
@@ -771,7 +795,7 @@ export default function GuestListTab({ onToast }) {
             <tbody>
               {guests.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="empty-state">
+                  <td colSpan={9} className="empty-state">
                     No guests yet.
                   </td>
                 </tr>
@@ -848,6 +872,15 @@ export default function GuestListTab({ onToast }) {
                           />
                         </td>
                         <td>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => toggleSentStatus(g)}
+                            style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
+                          >
+                            {g.link_sent_at ? '✓ Sent' : 'Not sent'}
+                          </button>
+                        </td>
+                        <td>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <a
                               href={rsvpUrl(g.rsvp_token)}
@@ -886,12 +919,21 @@ export default function GuestListTab({ onToast }) {
                         </td>
                         <td style={{ fontSize: 12.5 }}>
                           {g.party_size > 1 && <span>party of {g.party_size}</span>}
-                          {g.ticket_allotment?.length > 0 && (
+                          {g.allotment_total > 0 && (
                             <span style={{ display: 'block', color: 'var(--text-muted)' }}>
-                              gives out {g.ticket_allotment.reduce((sum, r) => sum + r.quantity, 0)}
+                              {g.allotment_distributed} of {g.allotment_total} given out
                             </span>
                           )}
-                          {!(g.party_size > 1) && !(g.ticket_allotment?.length > 0) && '—'}
+                          {!(g.party_size > 1) && !(g.allotment_total > 0) && '—'}
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => toggleSentStatus(g)}
+                            style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
+                          >
+                            {g.link_sent_at ? '✓ Sent' : 'Not sent'}
+                          </button>
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 6 }}>
@@ -924,7 +966,7 @@ export default function GuestListTab({ onToast }) {
                     {expandedAllotmentGuestId === g.id && (
                       <tr>
                         <td></td>
-                        <td colSpan={7} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                        <td colSpan={8} style={{ paddingTop: 0, paddingBottom: 16 }}>
                           <div
                             style={{
                               background: 'var(--surface-alt)',
