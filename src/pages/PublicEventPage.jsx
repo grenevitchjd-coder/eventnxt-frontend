@@ -106,6 +106,24 @@ export default function PublicEventPage() {
     if (profile?.font_family) loadGoogleFont(profile.font_family)
   }, [profile])
 
+  // Debounced live check of the typed code — display only; the backend
+  // re-validates authoritatively at checkout either way.
+  useEffect(() => {
+    const code = buyer.promo.trim()
+    if (!code) {
+      setPromoInfo(null)
+      return
+    }
+    const t = setTimeout(() => {
+      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(code)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then(setPromoInfo)
+        .catch(() => setPromoInfo(null))
+    }, 500)
+    return () => clearTimeout(t)
+  }, [buyer.promo, slug])
+
+
   if (error) {
     return (
       <div className="public-event-page">
@@ -151,23 +169,6 @@ export default function PublicEventPage() {
   } else if (OVERLAY_LOGO_POSITIONS.includes(requestedLogoPosition) && hasBanner) {
     logoMode = requestedLogoPosition
   }
-
-  // Debounced live check of the typed code — display only; the backend
-  // re-validates authoritatively at checkout either way.
-  useEffect(() => {
-    const code = buyer.promo.trim()
-    if (!code) {
-      setPromoInfo(null)
-      return
-    }
-    const t = setTimeout(() => {
-      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(code)}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then(setPromoInfo)
-        .catch(() => setPromoInfo(null))
-    }, 500)
-    return () => clearTimeout(t)
-  }, [buyer.promo, slug])
 
   const hasNativeTickets = Array.isArray(ticketTypes) && ticketTypes.length > 0
   const totalQty = Object.values(quantities).reduce((a, b) => a + b, 0)
