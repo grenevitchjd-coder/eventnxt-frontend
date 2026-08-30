@@ -593,6 +593,36 @@ export default function SalesReferralsTab({ onToast }) {
                   />
                 </div>
               )}
+              <div className="field">
+                <label htmlFor="pc-discount-type">Buyer discount (optional)</label>
+                <select
+                  id="pc-discount-type"
+                  style={selectStyle}
+                  value={codeForm.discount_type}
+                  onChange={(e) => setCodeForm({ ...codeForm, discount_type: e.target.value, discount_value: e.target.value ? codeForm.discount_value : '' })}
+                >
+                  <option value="">None — attribution only</option>
+                  <option value="percentage">% off the order</option>
+                  <option value="flat_amount">$ off the order</option>
+                </select>
+              </div>
+              {codeForm.discount_type && (
+                <div className="field" style={{ width: 120 }}>
+                  <label htmlFor="pc-discount-value">
+                    {codeForm.discount_type === 'percentage' ? 'Percent off' : 'Dollars off'}
+                  </label>
+                  <input
+                    id="pc-discount-value"
+                    required
+                    type="number"
+                    min={0}
+                    max={codeForm.discount_type === 'percentage' ? 100 : undefined}
+                    step={codeForm.discount_type === 'percentage' ? 1 : 0.01}
+                    value={codeForm.discount_value}
+                    onChange={(e) => setCodeForm({ ...codeForm, discount_value: e.target.value })}
+                  />
+                </div>
+              )}
               <button className="btn btn-secondary" type="submit" disabled={creatingCode}>
                 Add code
               </button>
