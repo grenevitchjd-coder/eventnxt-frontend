@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, getNewEventUrl } from '../api'
 import HomeTab from '../components/HomeTab'
+import OverviewTab from '../components/OverviewTab'
 import EventSettingsTab from '../components/EventSettingsTab'
 import TicketsSeatingTab from '../components/TicketsSeatingTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
@@ -50,7 +51,7 @@ const NAV_GROUPS = [
 ]
 
 export default function Dashboard() {
-  const [tab, setTab] = useState('home')
+  const [tab, setTab] = useState('overview')
   const [toast, setToast] = useState(null)
   const [me, setMe] = useState(null)
   const [events, setEvents] = useState(null) // null = loading, [] = none yet
@@ -107,8 +108,10 @@ export default function Dashboard() {
       )
     }
     if (!currentEvent) return null
-    const props = { onToast: showToast, eventId, event: currentEvent }
+    const props = { onToast: showToast, eventId, event: currentEvent, onNavigate: setTab }
     switch (tab) {
+      case 'overview':
+        return <OverviewTab key={eventId} {...props} />
       case 'home':
         return <HomeTab key={eventId} {...props} />
       case 'workspace':
@@ -160,6 +163,14 @@ export default function Dashboard() {
             + New Event
           </a>
         </div>
+
+        <button
+          className={`nav-item ${tab === 'overview' ? 'active' : ''}`}
+          style={{ marginBottom: 8 }}
+          onClick={() => setTab('overview')}
+        >
+          Overview
+        </button>
 
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="nav-group">
