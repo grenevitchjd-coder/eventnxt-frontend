@@ -231,6 +231,10 @@ export default function SalesReferralsTab({ onToast }) {
         reward_type: code.reward_type,
         points_rates: pointsRatesDraft,
         referral_message_draft: code.referral_message_draft,
+        // PATCH full-replaces these — resend them or saving points rates
+        // would silently wipe the code's buyer discount.
+        discount_type: code.discount_type || null,
+        discount_value: code.discount_value != null ? Number(code.discount_value) : null,
       })
       onToast('Points rates saved')
       loadAll(loadedEventId)
