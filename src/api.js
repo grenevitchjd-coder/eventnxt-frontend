@@ -244,4 +244,10 @@ export const api = {
   deleteTicketType: (eventId, ticketTypeId) =>
     request(`/events/${eventId}/ticket-types/${ticketTypeId}`, { method: 'DELETE' }),
 
+  // Orders admin
+  listOrders: (eventId, search = '') =>
+    request(`/events/${eventId}/orders${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  refundOrder: (eventId, orderId) =>
+    request(`/events/${eventId}/orders/${orderId}/refund`, { method: 'POST' }),
+
 }

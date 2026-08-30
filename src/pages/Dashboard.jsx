@@ -7,6 +7,7 @@ import GuestListTab from '../components/GuestListTab'
 import RSVPManagementTab from '../components/RSVPManagementTab'
 import SalesReferralsTab from '../components/SalesReferralsTab'
 import TicketsTab from '../components/TicketsTab'
+import OrdersTab from '../components/OrdersTab'
 
 const TABS = [
   { key: 'home', label: 'Home' },
@@ -15,6 +16,7 @@ const TABS = [
   { key: 'rsvp', label: 'RSVP management' },
   { key: 'sales', label: 'Sales & Referrals' },
   { key: 'tickets', label: 'Tickets' },
+  { key: 'orders', label: 'Orders' },
 ]
 
 export default function Dashboard() {
@@ -71,6 +73,7 @@ export default function Dashboard() {
         {tab === 'rsvp' && <RSVPManagementTab onToast={showToast} />}
         {tab === 'sales' && <SalesReferralsTab onToast={showToast} />}
         {tab === 'tickets' && <TicketsTab onToast={showToast} />}
+        {tab === 'orders' && <OrdersTab onToast={showToast} />}
       </main>
 
       {toast && <div className={`toast ${toast.isError ? 'toast-error' : ''}`}>{toast.message}</div>}
