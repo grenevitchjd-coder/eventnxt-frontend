@@ -294,7 +294,7 @@ export default function PublicEventPage() {
                   onChange={(e) => setBuyer({ ...buyer, email: e.target.value })}
                 />
                 <input
-                  placeholder="Referral / promo code (optional)"
+                  placeholder="Referral code (optional)"
                   value={buyer.promo}
                   onChange={(e) => setBuyer({ ...buyer, promo: e.target.value })}
                 />
