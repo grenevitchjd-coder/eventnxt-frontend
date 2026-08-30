@@ -26,9 +26,7 @@ const EMPTY_FORM = {
   description: '',
 }
 
-export default function TicketsTab({ onToast }) {
-  const [events, setEvents] = useState(null)
-  const [eventId, setEventId] = useState('')
+export default function TicketsTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
 
   const [ticketTypes, setTicketTypes] = useState(null)
@@ -41,17 +39,13 @@ export default function TicketsTab({ onToast }) {
   const [editForm, setEditForm] = useState(EMPTY_FORM)
   const [savingEdit, setSavingEdit] = useState(false)
 
+  // Event context (eventId) comes from the Dashboard shell, which also
+  // guarantees it's non-empty before rendering this tab and remounts it
+  // (key={eventId}) when the event changes, so loading once on mount is all
+  // that's needed here.
   useEffect(() => {
-    api
-      .listEvents()
-      .then((evs) => {
-        setEvents(evs)
-        if (evs.length > 0) {
-          setEventId(evs[0].id)
-          loadEventData(evs[0].id)
-        }
-      })
-      .catch((e) => onToast(e.message, true))
+    loadEventData(eventId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadEventData = (id) => {
@@ -65,10 +59,6 @@ export default function TicketsTab({ onToast }) {
       .catch((e) => onToast(e.message, true))
   }
 
-  const handleSelectEvent = (e) => {
-    setEventId(e.target.value)
-    loadEventData(e.target.value)
-  }
 
   const refresh = () => loadEventData(loadedEventId)
 
@@ -168,7 +158,6 @@ export default function TicketsTab({ onToast }) {
 
   const categoryName = (id) => categories.find((c) => c.id === id)?.name || '—'
 
-  if (events === null) return null
 
   const inputStyle = {
     background: 'var(--bg)',
@@ -189,29 +178,6 @@ export default function TicketsTab({ onToast }) {
         category's pool with the guest list.
       </p>
 
-      {events.length === 0 ? (
-        <div className="data-table">
-          <div className="empty-state">No events yet — create one in Events360's org dashboard first.</div>
-        </div>
-      ) : (
-        <div className="panel">
-          <div className="field">
-            <label htmlFor="tickets-event-picker">Event</label>
-            <select
-              id="tickets-event-picker"
-              style={{ width: '100%', minWidth: 280 }}
-              value={eventId}
-              onChange={handleSelectEvent}
-            >
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
 
       {loadedEventId && ticketTypes !== null && (
         <>

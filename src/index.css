@@ -1,3 +1,4 @@
+/* eventnxt-frontend: src/index.css */
 :root {
   --bg: #faf7f5;
   --surface: #ffffff;
@@ -193,6 +194,54 @@ a:focus-visible {
   border-radius: 6px;
   background: linear-gradient(135deg, var(--accent), var(--gold));
   flex-shrink: 0;
+}
+
+/* --- Global event context in the sidebar --- */
+.sidebar-event {
+  margin: 4px 0 14px;
+  padding: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sidebar-event-label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.sidebar-event-select {
+  width: 100%;
+  font-weight: 600;
+}
+
+.sidebar-new-event {
+  display: block;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+.sidebar-new-event:hover {
+  text-decoration: underline;
+}
+
+/* Lifecycle group headings: Set up / Promote / Manage */
+.nav-group {
+  margin-bottom: 10px;
+}
+
+.nav-group-label {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 12px 4px;
 }
 
 .nav-item {

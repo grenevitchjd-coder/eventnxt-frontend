@@ -1,3 +1,6 @@
+// eventnxt-frontend: src/components/RSVPManagementTab.jsx
+//
+// "RSVPs" tab. Event context comes from the Dashboard shell.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
@@ -37,9 +40,7 @@ function rowsFromParsedRecords(records) {
 
 const rsvpUrl = (token) => `${window.location.origin}/rsvp/${token}`
 
-export default function RSVPManagementTab({ onToast }) {
-  const [events, setEvents] = useState(null)
-  const [eventId, setEventId] = useState(() => sessionStorage.getItem('eventnxt_last_event_id') || '')
+export default function RSVPManagementTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
 
   const [guestTypes, setGuestTypes] = useState([])
@@ -65,26 +66,15 @@ export default function RSVPManagementTab({ onToast }) {
       .catch((e) => onToast(e.message, true))
   }
 
+  // Event context (eventId) comes from the Dashboard shell, which also
+  // guarantees it's non-empty before rendering this tab and remounts it
+  // (key={eventId}) when the event changes, so loading once on mount is all
+  // that's needed here.
   useEffect(() => {
-    api
-      .listEvents()
-      .then((evs) => {
-        setEvents(evs)
-        const restored = evs.find((e) => e.id === eventId)
-        const initial = restored ? restored.id : evs[0]?.id || ''
-        setEventId(initial)
-        if (initial) loadEventData(initial)
-      })
-      .catch((e) => onToast(e.message, true))
+    loadEventData(eventId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleSelectEvent = (e) => {
-    const id = e.target.value
-    setEventId(id)
-    setStagedRows(null)
-    if (id) loadEventData(id)
-  }
 
   const guestTypeName = (id) => guestTypes?.find((t) => t.id === id)?.name || 'unknown'
 
@@ -272,31 +262,6 @@ export default function RSVPManagementTab({ onToast }) {
         track of who still hasn't.
       </p>
 
-      {events === null ? null : events.length === 0 ? (
-        <div className="data-table">
-          <div className="empty-state">
-            No events yet — create one in Events360's org dashboard first, then come back here.
-          </div>
-        </div>
-      ) : (
-        <div className="panel">
-          <div className="field">
-            <label htmlFor="event-picker">Event</label>
-            <select
-              id="event-picker"
-              style={{ width: '100%', minWidth: 280 }}
-              value={eventId}
-              onChange={handleSelectEvent}
-            >
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
 
       {loadedEventId && guests !== null && (
         <>

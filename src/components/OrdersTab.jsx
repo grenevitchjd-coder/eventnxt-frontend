@@ -19,9 +19,7 @@ const STATUS_PILL = {
   refunded: 'pill-declined',
 }
 
-export default function OrdersTab({ onToast }) {
-  const [events, setEvents] = useState(null)
-  const [eventId, setEventId] = useState('')
+export default function OrdersTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
   const [orders, setOrders] = useState(null)
   const [search, setSearch] = useState('')
@@ -34,17 +32,13 @@ export default function OrdersTab({ onToast }) {
     api.getEventProfile(loadedEventId).then((prof) => setEventSlug(prof?.slug || null)).catch(() => {})
   }, [loadedEventId])
 
+  // Event context (eventId) comes from the Dashboard shell, which also
+  // guarantees it's non-empty before rendering this tab and remounts it
+  // (key={eventId}) when the event changes, so loading once on mount is all
+  // that's needed here.
   useEffect(() => {
-    api
-      .listEvents()
-      .then((evs) => {
-        setEvents(evs)
-        if (evs.length > 0) {
-          setEventId(evs[0].id)
-          loadOrders(evs[0].id, '')
-        }
-      })
-      .catch((e) => onToast(e.message, true))
+    loadOrders(eventId, '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadOrders = (id, term) => {
@@ -58,11 +52,6 @@ export default function OrdersTab({ onToast }) {
       .catch((e) => onToast(e.message, true))
   }
 
-  const handleSelectEvent = (e) => {
-    setEventId(e.target.value)
-    setSearch('')
-    loadOrders(e.target.value, '')
-  }
 
   const handleSearch = (e) => {
     e.preventDefault()
@@ -92,7 +81,6 @@ export default function OrdersTab({ onToast }) {
     }
   }
 
-  if (events === null) return null
 
   return (
     <>
@@ -102,46 +90,6 @@ export default function OrdersTab({ onToast }) {
         the buyer gets everything back, codes void, and the tickets go back on sale.
       </p>
 
-      {events.length === 0 ? (
-        <div className="data-table">
-          <div className="empty-state">No events yet.</div>
-        </div>
-      ) : (
-        <div className="panel">
-          <div className="inline-form" style={{ alignItems: 'flex-end' }}>
-            <div className="field">
-              <label htmlFor="orders-event-picker">Event</label>
-              <select
-                id="orders-event-picker"
-                style={{ minWidth: 260 }}
-                value={eventId}
-                onChange={handleSelectEvent}
-              >
-                {events.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <form className="inline-form" onSubmit={handleSearch} style={{ flex: 1 }}>
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="orders-search">Search buyers</label>
-                <input
-                  id="orders-search"
-                  style={{ width: '100%' }}
-                  placeholder="Name or email…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <button className="btn btn-secondary" type="submit">
-                Search
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {loadedEventId && orders !== null && (
         <table className="data-table">

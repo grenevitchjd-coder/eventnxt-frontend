@@ -1,3 +1,6 @@
+// eventnxt-frontend: src/components/SalesReferralsTab.jsx
+//
+// "Promos & referrals" tab. Event context comes from the Dashboard shell.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
@@ -64,9 +67,7 @@ function saleRowsFromRecords(records) {
   })
 }
 
-export default function SalesReferralsTab({ onToast }) {
-  const [events, setEvents] = useState(null)
-  const [eventId, setEventId] = useState(() => sessionStorage.getItem('eventnxt_last_event_id') || '')
+export default function SalesReferralsTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
 
   const [guests, setGuests] = useState([])
@@ -92,25 +93,15 @@ export default function SalesReferralsTab({ onToast }) {
     sessionStorage.setItem('eventnxt_last_event_id', id)
   }
 
+  // Event context (eventId) comes from the Dashboard shell, which also
+  // guarantees it's non-empty before rendering this tab and remounts it
+  // (key={eventId}) when the event changes, so loading once on mount is all
+  // that's needed here.
   useEffect(() => {
-    api
-      .listEvents()
-      .then((evs) => {
-        setEvents(evs)
-        const restored = evs.find((e) => e.id === eventId)
-        const initial = restored ? restored.id : evs[0]?.id || ''
-        setEventId(initial)
-        if (initial) loadAll(initial)
-      })
-      .catch((e) => onToast(e.message, true))
+    loadAll(eventId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleSelectEvent = (e) => {
-    const id = e.target.value
-    setEventId(id)
-    if (id) loadAll(id)
-  }
 
   const guestName = (id) => guests?.find((g) => g.id === id)?.name || 'unknown'
 
@@ -473,31 +464,6 @@ export default function SalesReferralsTab({ onToast }) {
         Promo codes, redemption and bonus tiers, box office reconciliation, and payouts owed.
       </p>
 
-      {events === null ? null : events.length === 0 ? (
-        <div className="data-table">
-          <div className="empty-state">
-            No events yet — create one in Events360's org dashboard first, then come back here.
-          </div>
-        </div>
-      ) : (
-        <div className="panel">
-          <div className="field">
-            <label htmlFor="event-picker">Event</label>
-            <select
-              id="event-picker"
-              style={{ width: '100%', minWidth: 280 }}
-              value={eventId}
-              onChange={handleSelectEvent}
-            >
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
 
       {loadedEventId && promoCodes !== null && (
         <>
