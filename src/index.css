@@ -756,3 +756,16 @@ a:focus-visible {
   opacity: 0.45;
   text-decoration: line-through;
 }
+
+.ticket-promo-ok {
+  font-size: 12.5px;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin: 0;
+}
+
+.ticket-promo-bad {
+  font-size: 12.5px;
+  color: var(--danger, #c0392b);
+  margin: 0;
+}

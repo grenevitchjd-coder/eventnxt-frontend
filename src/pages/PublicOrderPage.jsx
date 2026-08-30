@@ -95,12 +95,22 @@ export default function PublicOrderPage() {
                   </span>
                 </li>
               ))}
+              {order.discount_cents > 0 && (
+                <li>
+                  <span className="public-event-schedule-label" style={{ textAlign: 'left' }}>
+                    Discount
+                  </span>
+                  <span className="public-event-schedule-time">
+                    −{money(order.discount_cents, order.currency)}
+                  </span>
+                </li>
+              )}
               <li>
                 <span className="public-event-schedule-label" style={{ textAlign: 'left' }}>
                   Total
                 </span>
                 <span className="public-event-schedule-time" style={{ fontWeight: 700, color: 'var(--text)' }}>
-                  {money(order.subtotal_cents, order.currency)}
+                  {money(order.subtotal_cents - (order.discount_cents || 0), order.currency)}
                 </span>
               </li>
             </ul>

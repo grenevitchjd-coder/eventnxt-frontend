@@ -65,6 +65,24 @@ export default function PublicEventPage() {
   const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
+  // null = nothing checked; {valid, discount_type, discount_value} once checked
+  const [promoInfo, setPromoInfo] = useState(null)
+
+  // Tracked influencer links: /e/<slug>?ref=CODE. Remember the code per
+  // event (so it survives the buyer leaving and returning), pre-fill it
+  // at checkout, and ping the click counter once per landing. A code the
+  // buyer TYPES over this always wins — the deliberate action beats the
+  // remembered link.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ref = (params.get('ref') || '').trim()
+    if (ref) {
+      localStorage.setItem(`eventnxt-ref-${slug}`, ref)
+      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(ref)}/click`, { method: 'POST' }).catch(() => {})
+    }
+    const remembered = ref || localStorage.getItem(`eventnxt-ref-${slug}`) || ''
+    if (remembered) setBuyer((b) => (b.promo ? b : { ...b, promo: remembered }))
+  }, [slug])
 
   useEffect(() => {
     fetch(`${API_URL}/public/events/${slug}`)
@@ -134,11 +152,37 @@ export default function PublicEventPage() {
     logoMode = requestedLogoPosition
   }
 
+  // Debounced live check of the typed code — display only; the backend
+  // re-validates authoritatively at checkout either way.
+  useEffect(() => {
+    const code = buyer.promo.trim()
+    if (!code) {
+      setPromoInfo(null)
+      return
+    }
+    const t = setTimeout(() => {
+      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(code)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then(setPromoInfo)
+        .catch(() => setPromoInfo(null))
+    }, 500)
+    return () => clearTimeout(t)
+  }, [buyer.promo, slug])
+
   const hasNativeTickets = Array.isArray(ticketTypes) && ticketTypes.length > 0
   const totalQty = Object.values(quantities).reduce((a, b) => a + b, 0)
   const totalCents = hasNativeTickets
     ? ticketTypes.reduce((sum, t) => sum + (quantities[t.id] || 0) * t.price_cents, 0)
     : 0
+  const discountCents = (() => {
+    if (!promoInfo?.valid || !promoInfo.discount_type || totalCents === 0) return 0
+    const raw =
+      promoInfo.discount_type === 'percentage'
+        ? Math.round((totalCents * promoInfo.discount_value) / 100)
+        : Math.round(promoInfo.discount_value * 100)
+    return Math.max(0, Math.min(totalCents, raw))
+  })()
+  const dueCents = totalCents - discountCents
 
   const setQty = (t, next) => {
     const cap = Math.min(t.max_per_order, t.available)
@@ -298,16 +342,25 @@ export default function PublicEventPage() {
                   value={buyer.promo}
                   onChange={(e) => setBuyer({ ...buyer, promo: e.target.value })}
                 />
+                {buyer.promo.trim() && promoInfo && (
+                  <p className={promoInfo.valid ? 'ticket-promo-ok' : 'ticket-promo-bad'}>
+                    {!promoInfo.valid
+                      ? "This code isn't recognized for this event."
+                      : discountCents > 0
+                        ? `Code applied — you save ${money(discountCents, ticketTypes[0].currency)}.`
+                        : 'Referral code applied.'}
+                  </p>
+                )}
                 {checkoutError && <p className="ticket-checkout-error">{checkoutError}</p>}
                 <button className="btn btn-primary public-event-cta" type="submit" disabled={checkingOut}>
                   {checkingOut
                     ? 'One moment…'
-                    : totalCents === 0
+                    : dueCents === 0
                       ? `Get ${totalQty} free ticket${totalQty > 1 ? 's' : ''}`
-                      : `Continue to payment — ${money(totalCents, ticketTypes[0].currency)}`}
+                      : `Continue to payment — ${money(dueCents, ticketTypes[0].currency)}`}
                 </button>
                 <p className="ticket-buyer-note">
-                  Your tickets will be emailed to you{totalCents > 0 ? ' after payment' : ''}.
+                  Your tickets will be emailed to you{dueCents > 0 ? ' after payment' : ''}.
                 </p>
               </form>
             )}
