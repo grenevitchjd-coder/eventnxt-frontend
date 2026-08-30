@@ -634,3 +634,125 @@ a:focus-visible {
   margin: 0;
   white-space: pre-wrap;
 }
+/* ---------- Native ticket sales (public picker + order page) ---------- */
+
+.ticket-picker {
+  text-align: left;
+  border-top: 1px solid var(--border);
+}
+
+.ticket-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ticket-picker-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.ticket-picker-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.ticket-picker-price {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.ticket-picker-scarcity {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.ticket-picker-offsale {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ticket-qty-stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ticket-qty-stepper button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.ticket-qty-stepper button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ticket-qty-stepper span {
+  min-width: 20px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.ticket-buyer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+  align-items: center;
+}
+
+.ticket-buyer-form input {
+  width: 100%;
+  max-width: 360px;
+}
+
+.ticket-checkout-error {
+  color: var(--danger, #c0392b);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+.ticket-buyer-note {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Order page ticket codes */
+
+.order-ticket-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.order-ticket-code {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.order-ticket-void {
+  opacity: 0.45;
+  text-decoration: line-through;
+}

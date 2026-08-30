@@ -233,4 +233,15 @@ export const api = {
   listRewardRedemptions: (eventId) => request(`/events/${eventId}/reward-redemptions`),
   markRedemptionPaid: (eventId, redemptionId) =>
     request(`/events/${eventId}/reward-redemptions/${redemptionId}/mark-paid`, { method: 'PATCH' }),
+  // Native ticket sales — ticket types (organizer-facing; the PUBLIC
+  // picker/checkout/order endpoints are unauthenticated and called with
+  // plain fetch from the public pages, not through this client)
+  listTicketTypes: (eventId) => request(`/events/${eventId}/ticket-types`),
+  createTicketType: (eventId, payload) =>
+    request(`/events/${eventId}/ticket-types`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateTicketType: (eventId, ticketTypeId, payload) =>
+    request(`/events/${eventId}/ticket-types/${ticketTypeId}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteTicketType: (eventId, ticketTypeId) =>
+    request(`/events/${eventId}/ticket-types/${ticketTypeId}`, { method: 'DELETE' }),
+
 }

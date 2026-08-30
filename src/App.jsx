@@ -4,6 +4,7 @@ import AuthComplete from './pages/AuthComplete'
 import Dashboard from './pages/Dashboard'
 import PublicEventPage from './pages/PublicEventPage'
 import PublicRSVPPage from './pages/PublicRSVPPage'
+import PublicOrderPage from './pages/PublicOrderPage'
 import { isAuthenticated } from './api'
 
 function RequireAuth({ children }) {
@@ -19,6 +20,9 @@ export default function App() {
         <Route path="/auth/complete" element={<AuthComplete />} />
         {/* Public — no auth. The actual shareable page for an event. */}
         <Route path="/e/:slug" element={<PublicEventPage />} />
+        {/* Public — no auth. A buyer's own order/tickets page — the Stripe
+            success redirect, the email link, and Find My Tickets all land here. */}
+        <Route path="/e/:slug/order/:token" element={<PublicOrderPage />} />
         {/* Public — no auth. A specific guest's own RSVP / ticket-distribution link. */}
         <Route path="/rsvp/:token" element={<PublicRSVPPage />} />
         <Route

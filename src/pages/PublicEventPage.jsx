@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { loadGoogleFont, SocialIcon, platformLabel } from '../socialAndFonts'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
+
+function money(cents, currency) {
+  const amount = (cents / 100).toFixed(2)
+  return currency?.toLowerCase() === 'usd' ? `$${amount}` : `${amount} ${currency?.toUpperCase()}`
+}
 
 function formatDateRange(start, end) {
   if (!start) return null
@@ -49,8 +54,17 @@ const OVERLAY_LOGO_POSITIONS = ['top-left', 'top-center', 'top-right']
 
 export default function PublicEventPage() {
   const { slug } = useParams()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState(undefined) // undefined = loading, null = not found
   const [error, setError] = useState(false)
+
+  // Native ticket sales. null = still loading; [] = event sells nothing
+  // natively (external ticket link keeps doing its job, exactly as before).
+  const [ticketTypes, setTicketTypes] = useState(null)
+  const [quantities, setQuantities] = useState({})
+  const [buyer, setBuyer] = useState({ name: '', email: '' })
+  const [checkingOut, setCheckingOut] = useState(false)
+  const [checkoutError, setCheckoutError] = useState(null)
 
   useEffect(() => {
     fetch(`${API_URL}/public/events/${slug}`)
@@ -60,6 +74,11 @@ export default function PublicEventPage() {
       })
       .then(setProfile)
       .catch(() => setError(true))
+
+    fetch(`${API_URL}/public/events/${slug}/ticket-types`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setTicketTypes)
+      .catch(() => setTicketTypes([]))
   }, [slug])
 
   // Load the chosen display font once the profile arrives. Memoized inside
@@ -113,6 +132,51 @@ export default function PublicEventPage() {
     logoMode = 'hidden'
   } else if (OVERLAY_LOGO_POSITIONS.includes(requestedLogoPosition) && hasBanner) {
     logoMode = requestedLogoPosition
+  }
+
+  const hasNativeTickets = Array.isArray(ticketTypes) && ticketTypes.length > 0
+  const totalQty = Object.values(quantities).reduce((a, b) => a + b, 0)
+  const totalCents = hasNativeTickets
+    ? ticketTypes.reduce((sum, t) => sum + (quantities[t.id] || 0) * t.price_cents, 0)
+    : 0
+
+  const setQty = (t, next) => {
+    const cap = Math.min(t.max_per_order, t.available)
+    const clamped = Math.max(0, Math.min(cap, next))
+    setQuantities({ ...quantities, [t.id]: clamped })
+    setCheckoutError(null)
+  }
+
+  const handleCheckout = async (e) => {
+    e.preventDefault()
+    setCheckingOut(true)
+    setCheckoutError(null)
+    try {
+      const res = await fetch(`${API_URL}/public/events/${slug}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buyer_name: buyer.name,
+          buyer_email: buyer.email,
+          items: ticketTypes
+            .filter((t) => (quantities[t.id] || 0) > 0)
+            .map((t) => ({ ticket_type_id: t.id, quantity: quantities[t.id] })),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Checkout failed — please try again.')
+      if (data.checkout_url) {
+        // Paid order: off to Stripe. The webhook does the real work; the
+        // buyer comes back to the order page via the success redirect.
+        window.location.href = data.checkout_url
+      } else {
+        // $0 order: already paid, tickets already minted — straight there.
+        navigate(`/e/${slug}/order/${data.order_token}`)
+      }
+    } catch (err) {
+      setCheckoutError(err.message)
+      setCheckingOut(false)
+    }
   }
 
   return (
@@ -170,15 +234,89 @@ export default function PublicEventPage() {
         {profile.address && <p className="public-event-address">{profile.address}</p>}
         {profile.description && <p className="public-event-description">{profile.description}</p>}
 
-        {profile.external_ticket_url && (
-          <a
-            className="btn btn-primary public-event-cta"
-            href={profile.external_ticket_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Get Tickets
-          </a>
+        {/* Native ticket sales, when this event has them — otherwise the
+            external ticket link keeps working exactly as it always has.
+            An event with NO ticket types and NO external link simply shows
+            no ticket UI at all, same as before. */}
+        {hasNativeTickets ? (
+          <div className="public-event-section">
+            <h2 className="public-event-section-title" style={displayFont}>
+              Tickets
+            </h2>
+            <div className="ticket-picker">
+              {ticketTypes.map((t) => {
+                const qty = quantities[t.id] || 0
+                const cap = Math.min(t.max_per_order, t.available)
+                return (
+                  <div key={t.id} className="ticket-picker-row">
+                    <div className="ticket-picker-info">
+                      <div className="ticket-picker-name">{t.name}</div>
+                      {t.description && <div className="ticket-picker-desc">{t.description}</div>}
+                      <div className="ticket-picker-price">
+                        {t.price_cents === 0 ? 'Free' : money(t.price_cents, t.currency)}
+                        {t.on_sale && t.available > 0 && t.available <= 5 && (
+                          <span className="ticket-picker-scarcity"> · only {t.available} left</span>
+                        )}
+                      </div>
+                    </div>
+                    {t.on_sale ? (
+                      <div className="ticket-qty-stepper">
+                        <button type="button" onClick={() => setQty(t, qty - 1)} disabled={qty === 0} aria-label="fewer">
+                          −
+                        </button>
+                        <span>{qty}</span>
+                        <button type="button" onClick={() => setQty(t, qty + 1)} disabled={qty >= cap} aria-label="more">
+                          +
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="ticket-picker-offsale">{t.available === 0 ? 'Sold out' : 'Not on sale'}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {totalQty > 0 && (
+              <form className="ticket-buyer-form" onSubmit={handleCheckout}>
+                <input
+                  required
+                  placeholder="Your name"
+                  value={buyer.name}
+                  onChange={(e) => setBuyer({ ...buyer, name: e.target.value })}
+                />
+                <input
+                  required
+                  type="email"
+                  placeholder="you@example.com"
+                  value={buyer.email}
+                  onChange={(e) => setBuyer({ ...buyer, email: e.target.value })}
+                />
+                {checkoutError && <p className="ticket-checkout-error">{checkoutError}</p>}
+                <button className="btn btn-primary public-event-cta" type="submit" disabled={checkingOut}>
+                  {checkingOut
+                    ? 'One moment…'
+                    : totalCents === 0
+                      ? `Get ${totalQty} free ticket${totalQty > 1 ? 's' : ''}`
+                      : `Continue to payment — ${money(totalCents, ticketTypes[0].currency)}`}
+                </button>
+                <p className="ticket-buyer-note">
+                  Your tickets will be emailed to you{totalCents > 0 ? ' after payment' : ''}.
+                </p>
+              </form>
+            )}
+          </div>
+        ) : (
+          profile.external_ticket_url && (
+            <a
+              className="btn btn-primary public-event-cta"
+              href={profile.external_ticket_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Get Tickets
+            </a>
+          )
         )}
 
         {profile.about_us && (
