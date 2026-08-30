@@ -141,6 +141,14 @@ export const api = {
       body: JSON.stringify({ sent }),
     }),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
+  // Comp ticketing (guest modes)
+  sendGuestTicket: (eventId, guestId) =>
+    request(`/events/${eventId}/guests/${guestId}/send-ticket`, { method: 'POST' }),
+  listTicketRequests: (eventId) => request(`/events/${eventId}/guests/ticket-requests/all`),
+  approveTicketRequest: (eventId, requestId) =>
+    request(`/events/${eventId}/guests/ticket-requests/${requestId}/approve`, { method: 'POST' }),
+  denyTicketRequest: (eventId, requestId) =>
+    request(`/events/${eventId}/guests/ticket-requests/${requestId}/deny`, { method: 'POST' }),
 
   // Event profile (public-facing content + shareable page)
   getEventProfile: (eventId) => request(`/events/${eventId}/profile`, {}, { allow404: true }),

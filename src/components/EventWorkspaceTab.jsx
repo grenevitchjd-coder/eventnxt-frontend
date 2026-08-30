@@ -21,10 +21,10 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
 
   // ---- Guest types (accordion) ----
-  const [typeForm, setTypeForm] = useState({ name: '' })
+  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: '' })
   const [creatingType, setCreatingType] = useState(false)
   const [editingTypeId, setEditingTypeId] = useState(null)
-  const [typeEditForm, setTypeEditForm] = useState({ name: '' })
+  const [typeEditForm, setTypeEditForm] = useState({ name: '', guest_mode: '' })
   const [savingType, setSavingType] = useState(false)
   const [expandedTypeId, setExpandedTypeId] = useState(null)
   const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
@@ -67,7 +67,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     e.preventDefault()
     setCreatingType(true)
     try {
-      await api.createGuestType(loadedEventId, { name: typeForm.name })
+      await api.createGuestType(loadedEventId, { name: typeForm.name, guest_mode: typeForm.guest_mode || null })
       onToast(`"${typeForm.name}" added`)
       setTypeForm({ name: '' })
       loadEventData(loadedEventId)
@@ -80,13 +80,13 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
   const startEditType = (type) => {
     setEditingTypeId(type.id)
-    setTypeEditForm({ name: type.name })
+    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '' })
   }
 
   const saveEditType = async (typeId) => {
     setSavingType(true)
     try {
-      await api.updateGuestType(loadedEventId, typeId, { name: typeEditForm.name })
+      await api.updateGuestType(loadedEventId, typeId, { name: typeEditForm.name, guest_mode: typeEditForm.guest_mode || null })
       onToast('Saved')
       setEditingTypeId(null)
       loadEventData(loadedEventId)
@@ -217,8 +217,21 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                   required
                   placeholder="Volunteer"
                   value={typeForm.name}
-                  onChange={(e) => setTypeForm({ name: e.target.value })}
+                  onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })}
                 />
+              </div>
+              <div className="field">
+                <label htmlFor="type-mode">Guest experience</label>
+                <select
+                  id="type-mode"
+                  value={typeForm.guest_mode}
+                  onChange={(e) => setTypeForm({ ...typeForm, guest_mode: e.target.value })}
+                >
+                  <option value="">Auto — distribute if allotments, else invite</option>
+                  <option value="invite">Invite — RSVP for themselves</option>
+                  <option value="distribute">Distribute — hands out an allotment</option>
+                  <option value="select">Select — picks their own day</option>
+                </select>
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
                 Add guest type
@@ -250,9 +263,19 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                         <td>
                           <input
                             value={typeEditForm.name}
-                            onChange={(e) => setTypeEditForm({ name: e.target.value })}
+                            onChange={(e) => setTypeEditForm({ ...typeEditForm, name: e.target.value })}
                             style={{ width: '100%' }}
                           />
+                            <select
+                              style={{ marginTop: 6 }}
+                              value={typeEditForm.guest_mode}
+                              onChange={(e) => setTypeEditForm({ ...typeEditForm, guest_mode: e.target.value })}
+                            >
+                              <option value="">Auto mode</option>
+                              <option value="invite">Invite</option>
+                              <option value="distribute">Distribute</option>
+                              <option value="select">Select</option>
+                            </select>
                         </td>
                         <td className="actions-cell">
                           <button

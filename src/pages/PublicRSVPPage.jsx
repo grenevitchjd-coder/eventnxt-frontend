@@ -19,6 +19,9 @@ export default function PublicRSVPPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [recipients, setRecipients] = useState([emptyRecipient()])
+  const [selectedDay, setSelectedDay] = useState('')
+  const [requestForm, setRequestForm] = useState({ quantity: 1, note: '' })
+  const [requestOpen, setRequestOpen] = useState(false)
 
   const load = () => {
     fetch(`${API_URL}/public/rsvp/${token}`)
@@ -39,11 +42,36 @@ export default function PublicRSVPPage() {
       const res = await fetch(`${API_URL}/public/rsvp/${token}/respond`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attending }),
+        body: JSON.stringify(
+          attending && info?.effective_mode === 'select' && selectedDay
+            ? { attending, visit_date: selectedDay }
+            : { attending }
+        ),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Something went wrong')
       setInfo(data)
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleRequestTickets = async (e) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch(`${API_URL}/public/rsvp/${token}/request-tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity: Number(requestForm.quantity) || 1, note: requestForm.note || null }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Something went wrong')
+      setInfo(data)
+      setRequestOpen(false)
     } catch (err) {
       setSubmitError(err.message)
     } finally {
@@ -231,9 +259,17 @@ export default function PublicRSVPPage() {
             </p>
           )}
 
-          {info.allocation_status === 'confirmed' && (
+          {info.needs_seating && (
             <div className="panel" style={{ textAlign: 'left' }}>
-              <p style={{ margin: 0 }}>✓ You're confirmed. See you there!</p>
+              <p style={{ margin: 0 }}>
+                ✓ You&apos;re confirmed — your ticket will arrive once seating is finalized. Nothing more
+                to do on your end.
+              </p>
+            </div>
+          )}
+          {!info.needs_seating && info.allocation_status === 'confirmed' && (
+            <div className="panel" style={{ textAlign: 'left' }}>
+              <p style={{ margin: 0 }}>✓ You&apos;re confirmed. See you there!</p>
             </div>
           )}
           {info.allocation_status === 'declined' && (
@@ -241,9 +277,24 @@ export default function PublicRSVPPage() {
               <p style={{ margin: 0 }}>You've let us know you can't make it.</p>
             </div>
           )}
-          {info.allocation_status === 'pending' && (
+          {info.allocation_status === 'pending' && !info.needs_seating && info.effective_mode === 'select' && (info.available_days || []).length > 0 && (
+            <div className="panel" style={{ textAlign: 'left', marginBottom: 16 }}>
+              <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 600 }}>Which day works for you?</p>
+              {(info.available_days || []).map((d) => (
+                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', cursor: 'pointer' }}>
+                  <input type="radio" name="pick-day" checked={selectedDay === d} onChange={() => setSelectedDay(d)} />
+                  {formatDate(d)}
+                </label>
+              ))}
+            </div>
+          )}
+          {info.allocation_status === 'pending' && !info.needs_seating && (
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <button className="btn btn-primary" disabled={submitting} onClick={() => handleRespond(true)}>
+              <button
+                className="btn btn-primary"
+                disabled={submitting || (info.effective_mode === 'select' && (info.available_days || []).length > 0 && !selectedDay)}
+                onClick={() => handleRespond(true)}
+              >
                 Yes, I'll be there
               </button>
               <button className="btn btn-secondary" disabled={submitting} onClick={() => handleRespond(false)}>
@@ -262,6 +313,77 @@ export default function PublicRSVPPage() {
               </button>
             </p>
           )}
+          {(info.ticket_codes || []).length > 0 && (
+            <div className="panel" style={{ textAlign: 'left', marginTop: 16 }}>
+              <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 600 }}>
+                Your admission {info.ticket_codes.length > 1 ? 'codes' : 'code'} — show at the door
+              </p>
+              <div className="order-ticket-codes">
+                {info.ticket_codes.map((code) => (
+                  <div key={code} className="order-ticket-code">
+                    {code}
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 0 }}>
+                Also sent to your email.
+              </p>
+            </div>
+          )}
+
+          {info.effective_mode !== 'distribute' && info.allocation_status !== 'declined' && (
+            <div style={{ marginTop: 20, textAlign: 'left' }}>
+              {info.ticket_request_status === 'pending' ? (
+                <p style={{ fontSize: 13.5, color: 'var(--text-muted)' }}>
+                  Your request for extra tickets is with the organizer — you&apos;ll see it reflected here
+                  once they&apos;ve reviewed it.
+                </p>
+              ) : requestOpen ? (
+                <form onSubmit={handleRequestTickets} className="panel" style={{ textAlign: 'left' }}>
+                  <p style={{ marginTop: 0, fontWeight: 600 }}>Request more tickets</p>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <div>
+                      <label htmlFor="req-qty" style={{ display: 'block', fontSize: 12.5, marginBottom: 4 }}>
+                        How many more?
+                      </label>
+                      <input
+                        id="req-qty"
+                        type="number"
+                        min={1}
+                        max={10}
+                        style={{ width: 80 }}
+                        value={requestForm.quantity}
+                        onChange={(e) => setRequestForm({ ...requestForm, quantity: e.target.value })}
+                      />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <label htmlFor="req-note" style={{ display: 'block', fontSize: 12.5, marginBottom: 4 }}>
+                        Note (optional)
+                      </label>
+                      <input
+                        id="req-note"
+                        placeholder="e.g. bringing my agent"
+                        style={{ width: '100%' }}
+                        value={requestForm.note}
+                        onChange={(e) => setRequestForm({ ...requestForm, note: e.target.value })}
+                      />
+                    </div>
+                    <button className="btn btn-primary btn-sm" type="submit" disabled={submitting}>
+                      Send request
+                    </button>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => setRequestOpen(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button className="btn btn-secondary btn-sm" onClick={() => setRequestOpen(true)}>
+                  Need more tickets?
+                </button>
+              )}
+            </div>
+          )}
+
           {submitError && <p style={{ color: 'var(--danger, #c55)', marginTop: 16 }}>{submitError}</p>}
           {renderReferralCodes(info.referral_codes)}
         </div>

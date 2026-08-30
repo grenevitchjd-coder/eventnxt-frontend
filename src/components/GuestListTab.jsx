@@ -74,7 +74,11 @@ export default function GuestListTab({ onToast, eventId }) {
     party_size: 1,
     perks: '',
     comments: '',
+    guest_mode: '',
   })
+  const [ticketRequests, setTicketRequests] = useState([])
+  const [queueBusyId, setQueueBusyId] = useState(null)
+  const [queueSectionPick, setQueueSectionPick] = useState({}) // guestId -> categoryId
   const [creatingGuest, setCreatingGuest] = useState(false)
   const [editingGuestId, setEditingGuestId] = useState(null)
   const [guestEditForm, setGuestEditForm] = useState(null)
@@ -103,6 +107,7 @@ export default function GuestListTab({ onToast, eventId }) {
   const loadEventData = (id) => {
     setCategories(null)
     setGuests(null)
+    api.listTicketRequests(id).then(setTicketRequests).catch(() => {}) // absent pre-0021 backend: fine
     Promise.all([api.listSeatingCategories(id), api.listGuests(id), api.listGuestTypes(id)])
       .then(([cats, gsts, types]) => {
         setCategories(cats)
@@ -139,6 +144,7 @@ export default function GuestListTab({ onToast, eventId }) {
         party_size: Number(guestForm.party_size) || 1,
         perks: guestForm.perks || null,
         comments: guestForm.comments || null,
+        guest_mode: guestForm.guest_mode || null,
       })
       onToast(`${guestForm.name} added`)
       setGuestForm({
@@ -150,6 +156,7 @@ export default function GuestListTab({ onToast, eventId }) {
         party_size: 1,
         perks: '',
         comments: '',
+        guest_mode: '',
       })
       loadEventData(loadedEventId)
     } catch (err) {
@@ -170,6 +177,7 @@ export default function GuestListTab({ onToast, eventId }) {
       party_size: guest.party_size || 1,
       perks: guest.perks || '',
       comments: guest.comments || '',
+      guest_mode: guest.guest_mode || '',
     })
   }
 
@@ -185,6 +193,7 @@ export default function GuestListTab({ onToast, eventId }) {
         party_size: Number(guestEditForm.party_size) || 1,
         perks: guestEditForm.perks || null,
         comments: guestEditForm.comments || null,
+        guest_mode: guestEditForm.guest_mode ?? null,
       })
       onToast('Saved')
       setEditingGuestId(null)
@@ -193,6 +202,68 @@ export default function GuestListTab({ onToast, eventId }) {
       onToast(err.message, true)
     } finally {
       setSavingGuest(false)
+    }
+  }
+
+  // ---------- Needs-seating queue + ticket requests ----------
+
+  const resolveAndSend = async (guest) => {
+    setQueueBusyId(guest.id)
+    try {
+      const pickedSection = queueSectionPick[guest.id]
+      if (pickedSection) {
+        // Organizer chose a section explicitly — set it first, then send.
+        await api.updateGuest(loadedEventId, guest.id, {
+          name: guest.name,
+          email: guest.email,
+          guest_type_id: guest.guest_type_id,
+          seating_category_id: pickedSection,
+          allocation_status: guest.allocation_status,
+          party_size: guest.party_size,
+          perks: guest.perks || null,
+          comments: guest.comments || null,
+          guest_mode: guest.guest_mode ?? null,
+        })
+      }
+      await api.sendGuestTicket(loadedEventId, guest.id)
+      onToast(`${guest.name} seated — ticket sent`)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setQueueBusyId(null)
+    }
+  }
+
+  const declineFromQueue = async (guest) => {
+    if (!window.confirm(`Regretfully decline ${guest.name}? They'll show as declined.`)) return
+    try {
+      await api.updateGuest(loadedEventId, guest.id, {
+        name: guest.name,
+        email: guest.email,
+        guest_type_id: guest.guest_type_id,
+        seating_category_id: null,
+        allocation_status: 'declined',
+        party_size: guest.party_size,
+        perks: guest.perks || null,
+        comments: guest.comments || null,
+        guest_mode: guest.guest_mode ?? null,
+      })
+      onToast(`${guest.name} marked declined`)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
+  const handleRequest = async (req, approve) => {
+    try {
+      if (approve) await api.approveTicketRequest(loadedEventId, req.id)
+      else await api.denyTicketRequest(loadedEventId, req.id)
+      onToast(approve ? `Approved — ${req.guest_name}'s party grows by ${req.quantity}` : 'Request denied')
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
     }
   }
 
@@ -560,6 +631,19 @@ export default function GuestListTab({ onToast, eventId }) {
                 </select>
               </div>
               <div className="field">
+                <label htmlFor="g-mode">Mode</label>
+                <select
+                  id="g-mode"
+                  value={guestForm.guest_mode}
+                  onChange={(e) => setGuestForm({ ...guestForm, guest_mode: e.target.value })}
+                >
+                  <option value="">Auto (from guest type)</option>
+                  <option value="invite">Invite — RSVP for themselves</option>
+                  <option value="distribute">Distribute — hands out an allotment</option>
+                  <option value="select">Select — picks their own day</option>
+                </select>
+              </div>
+              <div className="field">
                 <label htmlFor="g-party-size">Party size</label>
                 <input
                   id="g-party-size"
@@ -747,6 +831,70 @@ export default function GuestListTab({ onToast, eventId }) {
           )}
 
           {/* ---------- Master guest list — filter, search, export ---------- */}
+          {(guests || []).some((g) => g.needs_seating) && (
+            <div className="panel" style={{ borderColor: 'var(--danger, #c55)' }}>
+              <div className="panel-title">Needs seating</div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+                These guests said YES but no section had room. Their yes is safe — nothing is sent yet.
+                Pick a section (or raise a capacity in Tickets &amp; seating, then leave it on Auto) and
+                send their ticket, or regretfully decline.
+              </p>
+              {(guests || [])
+                .filter((g) => g.needs_seating)
+                .map((g) => (
+                  <div key={g.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ flex: 1, minWidth: 140 }}>
+                      {g.name}
+                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}> · {guestTypeName(g.guest_type_id)} · party of {g.party_size}</span>
+                    </span>
+                    <select
+                      value={queueSectionPick[g.id] || ''}
+                      onChange={(e) => setQueueSectionPick({ ...queueSectionPick, [g.id]: e.target.value })}
+                    >
+                      <option value="">Auto (retry priorities)</option>
+                      {(categories || []).map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn btn-primary btn-sm" disabled={queueBusyId === g.id} onClick={() => resolveAndSend(g)}>
+                      {queueBusyId === g.id ? 'Sending…' : 'Assign & send ticket'}
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => declineFromQueue(g)}>
+                      Decline
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {ticketRequests.some((r) => r.status === 'pending') && (
+            <div className="panel">
+              <div className="panel-title">Ticket requests</div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+                Guests asking to bring more people. Approving grows their party (and sends the extra
+                codes if they&apos;re already confirmed).
+              </p>
+              {ticketRequests
+                .filter((r) => r.status === 'pending')
+                .map((r) => (
+                  <div key={r.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ flex: 1, minWidth: 160 }}>
+                      {r.guest_name} <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>wants +{r.quantity} (party of {r.current_party_size} now)</span>
+                      {r.note && <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>&ldquo;{r.note}&rdquo;</span>}
+                    </span>
+                    <button className="btn btn-primary btn-sm" onClick={() => handleRequest(r, true)}>
+                      Approve
+                    </button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => handleRequest(r, false)}>
+                      Deny
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-title">Guest list</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
@@ -962,6 +1110,14 @@ export default function GuestListTab({ onToast, eventId }) {
                       <tr>
                         <td>
                           {g.name}
+                          <span className="pill pill-pending" style={{ marginLeft: 6, fontSize: 10.5 }}>
+                            {g.effective_mode || 'invite'}
+                          </span>
+                          {g.needs_seating && (
+                            <span className="pill pill-declined" style={{ marginLeft: 4, fontSize: 10.5 }}>
+                              needs seating
+                            </span>
+                          )}
                           {(g.perks || g.comments) && (
                             <span
                               title={[g.perks && `Perks: ${g.perks}`, g.comments && `Comments: ${g.comments}`]
