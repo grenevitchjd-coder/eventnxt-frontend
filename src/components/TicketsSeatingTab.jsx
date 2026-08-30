@@ -60,10 +60,10 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [savingEdit, setSavingEdit] = useState(false)
 
   // Seating section create/edit
-  const [catForm, setCatForm] = useState({ name: '', capacity: '' })
+  const [catForm, setCatForm] = useState({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
   const [creatingCat, setCreatingCat] = useState(false)
   const [editingCatId, setEditingCatId] = useState(null)
-  const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '' })
+  const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
   const [savingCat, setSavingCat] = useState(false)
 
   const loadSeatingSummary = () => {
@@ -209,15 +209,33 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   const categoryName = (id) => (categories || []).find((c) => c.id === id)?.name || '—'
 
+  const KIND_LABELS = { ga: 'General admission', row: 'Row', table: 'Tables', seat: 'Assigned seats' }
+  const zoneStructure = (c) => {
+    if (c.sales_grain === 'table' && c.table_count) return `${c.table_count} tables × ${c.seats_per_table}`
+    const bits = [c.row_label, c.section_label].filter(Boolean).join(' · ')
+    if (c.sales_grain === 'seat') return bits ? `${bits} · assigned seats` : 'Assigned seats'
+    if (c.sales_grain === 'row') return bits || 'Row'
+    return 'General admission'
+  }
+  const zonePayload = (f) => ({
+    name: f.name,
+    capacity: f.sales_grain === 'table' ? 1 : Number(f.capacity), // derived server-side for tables
+    sales_grain: f.sales_grain,
+    row_label: f.row_label || null,
+    section_label: f.section_label || null,
+    table_count: f.sales_grain === 'table' ? Number(f.table_count) : null,
+    seats_per_table: f.sales_grain === 'table' ? Number(f.seats_per_table) : null,
+  })
+
   // ---------- Seating sections ----------
 
   const handleCreateCategory = async (e) => {
     e.preventDefault()
     setCreatingCat(true)
     try {
-      await api.createSeatingCategory(eventId, { name: catForm.name, capacity: Number(catForm.capacity) })
+      await api.createSeatingCategory(eventId, zonePayload(catForm))
       onToast(`"${catForm.name}" added`)
-      setCatForm({ name: '', capacity: '' })
+      setCatForm({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
       loadEventData()
     } catch (err) {
       onToast(err.message, true)
@@ -228,16 +246,21 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   const startEditCat = (cat) => {
     setEditingCatId(cat.id)
-    setCatEditForm({ name: cat.name, capacity: cat.capacity })
+    setCatEditForm({
+      name: cat.name,
+      capacity: cat.capacity,
+      sales_grain: cat.sales_grain || 'ga',
+      row_label: cat.row_label || '',
+      section_label: cat.section_label || '',
+      table_count: cat.table_count || '',
+      seats_per_table: cat.seats_per_table || '',
+    })
   }
 
   const saveEditCat = async (catId) => {
     setSavingCat(true)
     try {
-      await api.updateSeatingCategory(eventId, catId, {
-        name: catEditForm.name,
-        capacity: Number(catEditForm.capacity),
-      })
+      await api.updateSeatingCategory(eventId, catId, zonePayload(catEditForm))
       onToast('Saved')
       setEditingCatId(null)
       loadEventData()
@@ -495,27 +518,90 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             : 'Sections and their capacity — the pools your guest types\u2019 seating priorities draw from.'}
         </p>
         <form className="inline-form" onSubmit={handleCreateCategory}>
-          <div className="field">
+          <div className="field" style={{ minWidth: 160 }}>
             <label htmlFor="cat-name">Name</label>
             <input
               id="cat-name"
               required
+              placeholder="Row 1 — all sections"
               value={catForm.name}
               onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
             />
           </div>
           <div className="field">
-            <label htmlFor="cat-capacity">Capacity</label>
-            <input
-              id="cat-capacity"
-              type="number"
-              min={1}
-              required
-              style={{ minWidth: 90 }}
-              value={catForm.capacity}
-              onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })}
-            />
+            <label htmlFor="cat-kind">Structure</label>
+            <select
+              id="cat-kind"
+              value={catForm.sales_grain}
+              onChange={(e) => setCatForm({ ...catForm, sales_grain: e.target.value })}
+            >
+              <option value="ga">General admission (pool)</option>
+              <option value="row">Row — unassigned</option>
+              <option value="seat">Row — assigned seats</option>
+              <option value="table">Tables</option>
+            </select>
           </div>
+          {catForm.sales_grain === 'table' ? (
+            <>
+              <div className="field" style={{ width: 90 }}>
+                <label htmlFor="cat-tables">Tables</label>
+                <input
+                  id="cat-tables"
+                  type="number"
+                  min={1}
+                  required
+                  value={catForm.table_count}
+                  onChange={(e) => setCatForm({ ...catForm, table_count: e.target.value })}
+                />
+              </div>
+              <div className="field" style={{ width: 110 }}>
+                <label htmlFor="cat-tseats">Seats / table</label>
+                <input
+                  id="cat-tseats"
+                  type="number"
+                  min={1}
+                  required
+                  value={catForm.seats_per_table}
+                  onChange={(e) => setCatForm({ ...catForm, seats_per_table: e.target.value })}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="field">
+              <label htmlFor="cat-capacity">{catForm.sales_grain === 'ga' ? 'Capacity' : 'Seats'}</label>
+              <input
+                id="cat-capacity"
+                type="number"
+                min={1}
+                required
+                style={{ minWidth: 90 }}
+                value={catForm.capacity}
+                onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })}
+              />
+            </div>
+          )}
+          {(catForm.sales_grain === 'row' || catForm.sales_grain === 'seat') && (
+            <>
+              <div className="field" style={{ width: 110 }}>
+                <label htmlFor="cat-row">Row label</label>
+                <input
+                  id="cat-row"
+                  placeholder="Row 1"
+                  value={catForm.row_label}
+                  onChange={(e) => setCatForm({ ...catForm, row_label: e.target.value })}
+                />
+              </div>
+              <div className="field" style={{ width: 130 }}>
+                <label htmlFor="cat-section">Section(s)</label>
+                <input
+                  id="cat-section"
+                  placeholder="All sections"
+                  value={catForm.section_label}
+                  onChange={(e) => setCatForm({ ...catForm, section_label: e.target.value })}
+                />
+              </div>
+            </>
+          )}
           <button className="btn btn-secondary" type="submit" disabled={creatingCat}>
             Add section
           </button>
@@ -525,7 +611,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       <table className="data-table" style={{ marginBottom: 28 }}>
         <thead>
           <tr>
-            <th>Section</th>
+            <th>Zone</th>
+            <th>Structure</th>
             <th>Capacity</th>
             <th></th>
           </tr>
@@ -533,8 +620,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         <tbody>
           {categories.length === 0 ? (
             <tr>
-              <td colSpan={3} className="empty-state">
-                No seating sections yet.
+              <td colSpan={4} className="empty-state">
+                No seating zones yet.
               </td>
             </tr>
           ) : (
@@ -547,15 +634,62 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                       onChange={(e) => setCatEditForm({ ...catEditForm, name: e.target.value })}
                       style={{ width: '100%' }}
                     />
+                    {(catEditForm.sales_grain === 'row' || catEditForm.sales_grain === 'seat') && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                        <input
+                          placeholder="Row label"
+                          style={{ width: 90 }}
+                          value={catEditForm.row_label}
+                          onChange={(e) => setCatEditForm({ ...catEditForm, row_label: e.target.value })}
+                        />
+                        <input
+                          placeholder="Section(s)"
+                          style={{ width: 110 }}
+                          value={catEditForm.section_label}
+                          onChange={(e) => setCatEditForm({ ...catEditForm, section_label: e.target.value })}
+                        />
+                      </div>
+                    )}
                   </td>
                   <td>
-                    <input
-                      type="number"
-                      min={1}
-                      value={catEditForm.capacity}
-                      onChange={(e) => setCatEditForm({ ...catEditForm, capacity: e.target.value })}
-                      style={{ width: 80 }}
-                    />
+                    <select
+                      value={catEditForm.sales_grain}
+                      onChange={(e) => setCatEditForm({ ...catEditForm, sales_grain: e.target.value })}
+                    >
+                      <option value="ga">GA</option>
+                      <option value="row">Row</option>
+                      <option value="seat">Assigned</option>
+                      <option value="table">Tables</option>
+                    </select>
+                  </td>
+                  <td>
+                    {catEditForm.sales_grain === 'table' ? (
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          min={1}
+                          style={{ width: 55 }}
+                          value={catEditForm.table_count}
+                          onChange={(e) => setCatEditForm({ ...catEditForm, table_count: e.target.value })}
+                        />
+                        ×
+                        <input
+                          type="number"
+                          min={1}
+                          style={{ width: 55 }}
+                          value={catEditForm.seats_per_table}
+                          onChange={(e) => setCatEditForm({ ...catEditForm, seats_per_table: e.target.value })}
+                        />
+                      </div>
+                    ) : (
+                      <input
+                        type="number"
+                        min={1}
+                        value={catEditForm.capacity}
+                        onChange={(e) => setCatEditForm({ ...catEditForm, capacity: e.target.value })}
+                        style={{ width: 80 }}
+                      />
+                    )}
                   </td>
                   <td className="actions-cell">
                     <button
@@ -573,6 +707,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               ) : (
                 <tr key={c.id}>
                   <td>{c.name}</td>
+                  <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{zoneStructure(c)}</td>
                   <td className="mono">{c.capacity}</td>
                   <td className="actions-cell">
                     <button className="btn btn-secondary btn-sm" onClick={() => startEditCat(c)}>
