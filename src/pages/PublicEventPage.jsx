@@ -67,6 +67,9 @@ export default function PublicEventPage() {
   const [checkoutError, setCheckoutError] = useState(null)
   // null = nothing checked; {valid, discount_type, discount_value} once checked
   const [promoInfo, setPromoInfo] = useState(null)
+  // Find-my-tickets mini-form: closed | open | sending | sent
+  const [findState, setFindState] = useState('closed')
+  const [findEmail, setFindEmail] = useState('')
 
   // Tracked influencer links: /e/<slug>?ref=CODE. Remember the code per
   // event (so it survives the buyer leaving and returning), pre-fill it
@@ -190,6 +193,21 @@ export default function PublicEventPage() {
     const clamped = Math.max(0, Math.min(cap, next))
     setQuantities({ ...quantities, [t.id]: clamped })
     setCheckoutError(null)
+  }
+
+  const handleFindTickets = async (e) => {
+    e.preventDefault()
+    setFindState('sending')
+    try {
+      await fetch(`${API_URL}/public/events/${slug}/find-my-tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: findEmail }),
+      })
+    } catch {
+      // deliberately identical outcome — the message below stays honest either way
+    }
+    setFindState('sent')
   }
 
   const handleCheckout = async (e) => {
@@ -378,6 +396,34 @@ export default function PublicEventPage() {
             </a>
           )
         )}
+
+        {/* Self-serve recovery — send-to-the-inbox, never display-for-a-typed-email. */}
+        <div className="find-tickets">
+          {findState === 'closed' && (
+            <button type="button" className="find-tickets-link" onClick={() => setFindState('open')}>
+              Already bought tickets? Find my tickets
+            </button>
+          )}
+          {(findState === 'open' || findState === 'sending') && (
+            <form className="find-tickets-form" onSubmit={handleFindTickets}>
+              <input
+                required
+                type="email"
+                placeholder="Email you bought with"
+                value={findEmail}
+                onChange={(e) => setFindEmail(e.target.value)}
+              />
+              <button className="btn btn-secondary" type="submit" disabled={findState === 'sending'}>
+                {findState === 'sending' ? 'Sending…' : 'Email my tickets'}
+              </button>
+            </form>
+          )}
+          {findState === 'sent' && (
+            <p className="find-tickets-note">
+              If tickets exist for that email, we've sent them. Check your inbox (and spam).
+            </p>
+          )}
+        </div>
 
         {profile.about_us && (
           <div className="public-event-section">
