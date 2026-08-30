@@ -62,7 +62,7 @@ export default function PublicEventPage() {
   // natively (external ticket link keeps doing its job, exactly as before).
   const [ticketTypes, setTicketTypes] = useState(null)
   const [quantities, setQuantities] = useState({})
-  const [buyer, setBuyer] = useState({ name: '', email: '' })
+  const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
 
@@ -161,6 +161,7 @@ export default function PublicEventPage() {
           items: ticketTypes
             .filter((t) => (quantities[t.id] || 0) > 0)
             .map((t) => ({ ticket_type_id: t.id, quantity: quantities[t.id] })),
+          promo_code: buyer.promo.trim() || null,
         }),
       })
       const data = await res.json()
@@ -291,6 +292,11 @@ export default function PublicEventPage() {
                   placeholder="you@example.com"
                   value={buyer.email}
                   onChange={(e) => setBuyer({ ...buyer, email: e.target.value })}
+                />
+                <input
+                  placeholder="Referral / promo code (optional)"
+                  value={buyer.promo}
+                  onChange={(e) => setBuyer({ ...buyer, promo: e.target.value })}
                 />
                 {checkoutError && <p className="ticket-checkout-error">{checkoutError}</p>}
                 <button className="btn btn-primary public-event-cta" type="submit" disabled={checkingOut}>
