@@ -174,6 +174,21 @@ export const api = {
   // Seating summary reconciliation
   getSeatingSummary: (eventId) => request(`/events/${eventId}/seating-categories/summary`),
 
+  // Event settings — the operating profile (ticketing mode / sales source /
+  // comp delivery). GET infers for events that never chose.
+  getEventSettings: (eventId) => request(`/events/${eventId}/settings`),
+  updateEventSettings: (eventId, payload) =>
+    request(`/events/${eventId}/settings`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  // Settings-adjacent profile fields (work before the page editor's first save)
+  setRefundPolicy: (eventId, refund_policy) =>
+    request(`/events/${eventId}/profile/refund-policy`, {
+      method: 'PATCH',
+      body: JSON.stringify({ refund_policy }),
+    }),
+  uploadVenueMap: (eventId, file) => uploadFile(`/events/${eventId}/profile/venue-map`, file),
+  removeVenueMap: (eventId) => request(`/events/${eventId}/profile/venue-map`, { method: 'DELETE' }),
+
   // Sales platform config
   getSalesConfig: (eventId) => request(`/events/${eventId}/sales-config`),
   setSalesConfig: (eventId, platform) =>

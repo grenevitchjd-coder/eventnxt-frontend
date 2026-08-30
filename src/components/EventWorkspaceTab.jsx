@@ -19,16 +19,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   const [guestTypes, setGuestTypes] = useState([])
   const [categories, setCategories] = useState(null)
 
-  // ---- Seating categories ----
-  const [catForm, setCatForm] = useState({ name: '', capacity: '' })
-  const [creatingCat, setCreatingCat] = useState(false)
-  const [editingCatId, setEditingCatId] = useState(null)
-  const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '' })
-  const [savingCat, setSavingCat] = useState(false)
-
-  // ---- Seating summary reconciliation ----
-  const [seatingSummary, setSeatingSummary] = useState(null)
-  const [loadingSummary, setLoadingSummary] = useState(false)
 
   // ---- Guest types (accordion) ----
   const [typeForm, setTypeForm] = useState({ name: '' })
@@ -47,7 +37,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
   const loadEventData = (id) => {
     setCategories(null)
-    setSeatingSummary(null)
     Promise.all([api.listSeatingCategories(id), api.listGuestTypes(id)])
       .then(([cats, types]) => {
         setCategories(cats)
@@ -59,19 +48,8 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
-    loadSeatingSummaryFor(id)
   }
 
-  const loadSeatingSummaryFor = (id) => {
-    setLoadingSummary(true)
-    api
-      .getSeatingSummary(id)
-      .then(setSeatingSummary)
-      .catch((e) => onToast(e.message, true))
-      .finally(() => setLoadingSummary(false))
-  }
-
-  const loadSeatingSummary = () => loadSeatingSummaryFor(loadedEventId)
 
   // Event context (eventId) comes from the Dashboard shell, which also
   // guarantees it's non-empty before rendering this tab and remounts it
@@ -82,56 +60,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-
-  // ---------- Seating categories ----------
-
-  const handleCreateCategory = async (e) => {
-    e.preventDefault()
-    setCreatingCat(true)
-    try {
-      await api.createSeatingCategory(loadedEventId, { name: catForm.name, capacity: Number(catForm.capacity) })
-      onToast(`"${catForm.name}" added`)
-      setCatForm({ name: '', capacity: '' })
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setCreatingCat(false)
-    }
-  }
-
-  const startEditCat = (cat) => {
-    setEditingCatId(cat.id)
-    setCatEditForm({ name: cat.name, capacity: cat.capacity })
-  }
-
-  const saveEditCat = async (catId) => {
-    setSavingCat(true)
-    try {
-      await api.updateSeatingCategory(loadedEventId, catId, {
-        name: catEditForm.name,
-        capacity: Number(catEditForm.capacity),
-      })
-      onToast('Saved')
-      setEditingCatId(null)
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingCat(false)
-    }
-  }
-
-  const deleteCategory = async (cat) => {
-    if (!window.confirm(`Delete "${cat.name}"? Any guests assigned to it will become unassigned.`)) return
-    try {
-      await api.deleteSeatingCategory(loadedEventId, cat.id)
-      onToast(`"${cat.name}" deleted`)
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    }
-  }
 
   // ---------- Guest types + priority seating ----------
 
@@ -263,163 +191,16 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
   return (
     <>
-      <div className="page-title">Event workspace</div>
+      <div className="page-title">Guest types</div>
       <p className="page-subtitle">
-        Pick an event from your org to manage its seating categories and guest types. Add or import guests
-        from the Guest list tab.
+        The kinds of comp guests this event has — models, sponsors, press — each with its seating
+        priority list (which sections it fills, in order) and default per-day ticket allotments.
+        Sections themselves live in Tickets &amp; seating; guests are added on the Guest list tab.
       </p>
 
 
       {loadedEventId && categories !== null && (
         <>
-          {/* ---------- Seating categories FIRST — guest types' priority lists depend on these existing ---------- */}
-          <div className="panel">
-            <div className="panel-title">Add a seating category</div>
-            <form className="inline-form" onSubmit={handleCreateCategory}>
-              <div className="field">
-                <label htmlFor="cat-name">Name</label>
-                <input
-                  id="cat-name"
-                  required
-                  value={catForm.name}
-                  onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="cat-capacity">Capacity</label>
-                <input
-                  id="cat-capacity"
-                  type="number"
-                  min={1}
-                  required
-                  style={{ minWidth: 90 }}
-                  value={catForm.capacity}
-                  onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })}
-                />
-              </div>
-              <button className="btn btn-secondary" type="submit" disabled={creatingCat}>
-                Add category
-              </button>
-            </form>
-          </div>
-
-          <table className="data-table" style={{ marginBottom: 28 }}>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Capacity</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="empty-state">
-                    No seating categories yet.
-                  </td>
-                </tr>
-              ) : (
-                categories.map((c) =>
-                  editingCatId === c.id ? (
-                    <tr key={c.id}>
-                      <td>
-                        <input
-                          value={catEditForm.name}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={1}
-                          value={catEditForm.capacity}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, capacity: e.target.value })}
-                          style={{ width: 80 }}
-                        />
-                      </td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={savingCat}
-                          onClick={() => saveEditCat(c.id)}
-                        >
-                          Save
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingCatId(null)}>
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={c.id}>
-                      <td>{c.name}</td>
-                      <td className="mono">{c.capacity}</td>
-                      <td className="actions-cell">
-                        <button className="btn btn-secondary btn-sm" onClick={() => startEditCat(c)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => deleteCategory(c)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )
-              )}
-            </tbody>
-          </table>
-
-          {/* ---------- Seating Summary — capacity/box office/guest list reconciliation ---------- */}
-          <div className="panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="panel-title" style={{ margin: 0 }}>
-                Seating summary
-              </div>
-              <button className="btn btn-secondary btn-sm" onClick={loadSeatingSummary} disabled={loadingSummary}>
-                {loadingSummary ? 'Refreshing…' : 'Refresh'}
-              </button>
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 14 }}>
-              A live reconciliation across every source — box office sales are matched by ticket type
-              against each category's name. "Confirmed avail." mirrors the real capacity check; "estimated
-              avail." is the more conservative number, also subtracting pending guest-list holds and box
-              office sales.
-            </p>
-            {seatingSummary === null ? (
-              <p style={{ fontSize: 13 }}>Loading…</p>
-            ) : seatingSummary.length === 0 ? (
-              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No seating categories yet.</p>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Capacity</th>
-                    <th>Box office</th>
-                    <th>Allotted</th>
-                    <th>Committed</th>
-                    <th>Confirmed avail.</th>
-                    <th>Estimated avail.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {seatingSummary.map((row) => (
-                    <tr key={row.category_id}>
-                      <td>{row.category_name}</td>
-                      <td className="mono">{row.capacity}</td>
-                      <td className="mono">{row.box_office}</td>
-                      <td className="mono">{row.allotted}</td>
-                      <td className="mono">{row.committed}</td>
-                      <td className="mono">{row.confirmed_avail}</td>
-                      <td className="mono">{row.estimated_avail}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
           {/* ---------- Guest types SECOND — accordion, expand to manage priority seating list ---------- */}
           <div className="panel">
             <div className="panel-title">Add a guest type</div>

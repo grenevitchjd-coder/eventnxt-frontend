@@ -425,6 +425,15 @@ export default function PublicEventPage() {
           )}
         </div>
 
+        {profile.venue_map_url && (
+          <div className="public-event-section">
+            <h2 className="public-event-section-title" style={displayFont}>
+              Venue map
+            </h2>
+            <img src={profile.venue_map_url} alt="Venue and seating map" className="public-event-venue-map" />
+          </div>
+        )}
+
         {profile.about_us && (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>

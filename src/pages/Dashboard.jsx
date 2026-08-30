@@ -13,11 +13,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, getNewEventUrl } from '../api'
 import HomeTab from '../components/HomeTab'
+import EventSettingsTab from '../components/EventSettingsTab'
+import TicketsSeatingTab from '../components/TicketsSeatingTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
 import GuestListTab from '../components/GuestListTab'
 import RSVPManagementTab from '../components/RSVPManagementTab'
 import SalesReferralsTab from '../components/SalesReferralsTab'
-import TicketsTab from '../components/TicketsTab'
 import OrdersTab from '../components/OrdersTab'
 
 // Same key the old per-tab pickers used, so nobody loses their place when
@@ -28,8 +29,9 @@ const NAV_GROUPS = [
   {
     label: 'Set up',
     tabs: [
-      { key: 'tickets', label: 'Ticket types' },
-      { key: 'workspace', label: 'Seating & capacity' },
+      { key: 'settings', label: 'Event settings' },
+      { key: 'tickets', label: 'Tickets & seating' },
+      { key: 'workspace', label: 'Guest types' },
       { key: 'home', label: 'Event page' },
     ],
   },
@@ -117,8 +119,10 @@ export default function Dashboard() {
         return <RSVPManagementTab key={eventId} {...props} />
       case 'sales':
         return <SalesReferralsTab key={eventId} {...props} />
+      case 'settings':
+        return <EventSettingsTab key={eventId} {...props} />
       case 'tickets':
-        return <TicketsTab key={eventId} {...props} />
+        return <TicketsSeatingTab key={eventId} {...props} />
       case 'orders':
         return <OrdersTab key={eventId} {...props} />
       default:

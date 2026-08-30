@@ -231,6 +231,13 @@ a:focus-visible {
   text-decoration: underline;
 }
 
+.public-event-venue-map {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
 /* Lifecycle group headings: Set up / Promote / Manage */
 .nav-group {
   margin-bottom: 10px;
