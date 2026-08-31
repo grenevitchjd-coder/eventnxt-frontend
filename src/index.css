@@ -238,17 +238,63 @@ a:focus-visible {
   display: block;
 }
 
-/* Lifecycle group headings: Set up / Promote / Manage */
+/* Lifecycle groups (Set up / Promote / Manage) are collapsible dropdowns.
+   The group holding the active tab is always open; others remember their
+   state. Disabled styles below are the role-gating surface: restricted
+   roles get the same sidebar with toggles/items disabled, Check-in live. */
 .nav-group {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
-.nav-group-label {
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  font-family: inherit;
   font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 6px 12px 4px;
+  cursor: pointer;
+}
+
+.nav-group-toggle:hover {
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.nav-caret {
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.nav-group-toggle.open .nav-caret {
+  transform: rotate(90deg);
+}
+
+.nav-group-items {
+  padding-left: 10px;
+}
+
+/* Role-gated / unavailable state (also covers Check-in with no event) */
+.nav-item:disabled,
+.nav-group-toggle:disabled {
+  color: var(--border);
+  cursor: not-allowed;
+  background: none;
+}
+
+.nav-checkin {
+  margin-top: 4px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .nav-item {

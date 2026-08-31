@@ -7,8 +7,21 @@
 // remounts it and it reloads its data — tabs keep their simple
 // load-once-on-mount logic.
 //
-// Sidebar is grouped by lifecycle (Set up / Promote / Manage) so a
-// first-time organizer reads it as a sequence, not a feature list.
+// Sidebar is grouped by lifecycle (Set up / Promote / Manage) rendered as
+// COLLAPSIBLE dropdowns, so a first visit reads as just:
+//   Overview / Set up / Promote / Manage / Check-in.
+// The group containing the active tab is always held open (so Overview's
+// checklist can deep-link into a collapsed group and the highlight is
+// visible); any other group the user opens is remembered in localStorage.
+//
+// Check-in is a TOP-LEVEL item, not a Manage child: it's a live door tool
+// that opens in its own tab, and it's the future landing point for
+// restricted roles. When per-role gating lands (Events360 roles arrive on
+// me.role, already fetched below), door-staff roles will render Overview
+// and the three group toggles with disabled={true} — the CSS for that
+// state already exists (.nav-item:disabled / .nav-group-toggle:disabled) —
+// leaving Check-in as the only live control. Same layout for every role,
+// just fewer things enabled.
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, getNewEventUrl } from '../api'
@@ -25,9 +38,13 @@ import OrdersTab from '../components/OrdersTab'
 // Same key the old per-tab pickers used, so nobody loses their place when
 // this ships.
 const LAST_EVENT_KEY = 'eventnxt_last_event_id'
+// Which sidebar groups the user has manually opened. localStorage (not
+// session) — how you arrange your sidebar should survive a new tab.
+const NAV_OPEN_KEY = 'eventnxt_nav_open'
 
 const NAV_GROUPS = [
   {
+    key: 'setup',
     label: 'Set up',
     tabs: [
       { key: 'settings', label: 'Event settings' },
@@ -37,10 +54,12 @@ const NAV_GROUPS = [
     ],
   },
   {
+    key: 'promote',
     label: 'Promote',
     tabs: [{ key: 'sales', label: 'Promos & referrals' }],
   },
   {
+    key: 'manage',
     label: 'Manage',
     tabs: [
       { key: 'orders', label: 'Orders' },
@@ -50,12 +69,23 @@ const NAV_GROUPS = [
   },
 ]
 
+const loadOpenGroups = () => {
+  try {
+    const raw = localStorage.getItem(NAV_OPEN_KEY)
+    const parsed = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
 export default function Dashboard() {
   const [tab, setTab] = useState('overview')
   const [toast, setToast] = useState(null)
   const [me, setMe] = useState(null)
   const [events, setEvents] = useState(null) // null = loading, [] = none yet
   const [eventId, setEventId] = useState('')
+  const [openGroups, setOpenGroups] = useState(loadOpenGroups)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -91,6 +121,18 @@ export default function Dashboard() {
   const handleLogout = () => {
     clearToken()
     navigate('/login')
+  }
+
+  const toggleGroup = (key) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      try {
+        localStorage.setItem(NAV_OPEN_KEY, JSON.stringify(next))
+      } catch {
+        // storage full/blocked — the toggle still works for this session
+      }
+      return next
+    })
   }
 
   const currentEvent = events?.find((ev) => ev.id === eventId) || null
@@ -172,25 +214,45 @@ export default function Dashboard() {
           Overview
         </button>
 
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label} className="nav-group">
-            <div className="nav-group-label">{group.label}</div>
-            {group.tabs.map((t) => (
+        {NAV_GROUPS.map((group) => {
+          const containsActive = group.tabs.some((t) => t.key === tab)
+          const isOpen = containsActive || openGroups[group.key] === true
+          return (
+            <div key={group.key} className="nav-group">
               <button
-                key={t.key}
-                className={`nav-item ${tab === t.key ? 'active' : ''}`}
-                onClick={() => setTab(t.key)}
+                className={`nav-group-toggle ${isOpen ? 'open' : ''}`}
+                onClick={() => toggleGroup(group.key)}
+                aria-expanded={isOpen}
               >
-                {t.label}
+                <span>{group.label}</span>
+                <span className="nav-caret" aria-hidden="true">
+                  ▸
+                </span>
               </button>
-            ))}
-            {group.label === 'Manage' && eventId && (
-              <button className="nav-item" onClick={() => window.open(`/checkin/${eventId}`, '_blank')}>
-                Check-in ↗
-              </button>
-            )}
-          </div>
-        ))}
+              {isOpen && (
+                <div className="nav-group-items">
+                  {group.tabs.map((t) => (
+                    <button
+                      key={t.key}
+                      className={`nav-item ${tab === t.key ? 'active' : ''}`}
+                      onClick={() => setTab(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        <button
+          className="nav-item nav-checkin"
+          disabled={!eventId}
+          onClick={() => window.open(`/checkin/${eventId}`, '_blank')}
+        >
+          Check-in ↗
+        </button>
 
         <div className="sidebar-footer">
           <div className="sidebar-user">{me ? `${me.name} · ${me.role}` : '...'}</div>
