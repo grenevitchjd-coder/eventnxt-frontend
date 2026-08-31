@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import jsQR from 'jsqr'
 import { api } from '../api'
 
 const RESULT_STYLES = {
@@ -70,7 +71,14 @@ export default function ScanPage() {
   }
 
   const startCamera = async () => {
-    if (!('BarcodeDetector' in window)) {
+    // Two decode engines, chosen by capability:
+    // - BarcodeDetector (Chrome/Android): native, fast, cheap.
+    // - jsQR (everything else, notably iPhone Safari): each tick draws
+    //   the video frame to a small offscreen canvas and decodes the
+    //   pixels in JS. Downscaling to ~480px wide keeps decode fast
+    //   while leaving codes at arm's length readable.
+    // Camera support itself (getUserMedia) is the only hard requirement.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraState('unsupported')
       return
     }
@@ -80,19 +88,40 @@ export default function ScanPage() {
       videoRef.current.srcObject = stream
       await videoRef.current.play()
       setCameraState('on')
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] })
+
+      const maybeRedeem = (value) => {
+        const now = Date.now()
+        // Debounce: the same QR sits in frame for many ticks — only
+        // redeem when the code changes or 3s have passed.
+        if (value !== lastScanRef.current.code || now - lastScanRef.current.at > 3000) {
+          lastScanRef.current = { code: value, at: now }
+          redeem(value)
+        }
+      }
+
+      const native = 'BarcodeDetector' in window
+      const detector = native ? new window.BarcodeDetector({ formats: ['qr_code'] }) : null
+      const canvas = native ? null : document.createElement('canvas')
+      const ctx = native ? null : canvas.getContext('2d', { willReadFrequently: true })
+
       const tick = async () => {
         if (!streamRef.current) return
         try {
-          const codes = await detector.detect(videoRef.current)
-          if (codes.length > 0) {
-            const value = codes[0].rawValue
-            const now = Date.now()
-            // Debounce: the same QR sits in frame for many ticks — only
-            // redeem when the code changes or 3s have passed.
-            if (value !== lastScanRef.current.code || now - lastScanRef.current.at > 3000) {
-              lastScanRef.current = { code: value, at: now }
-              redeem(value)
+          if (native) {
+            const codes = await detector.detect(videoRef.current)
+            if (codes.length > 0) maybeRedeem(codes[0].rawValue)
+          } else {
+            const vw = videoRef.current.videoWidth
+            const vh = videoRef.current.videoHeight
+            if (vw > 0) {
+              const w = Math.min(480, vw)
+              const h = Math.round((vh / vw) * w)
+              canvas.width = w
+              canvas.height = h
+              ctx.drawImage(videoRef.current, 0, 0, w, h)
+              const img = ctx.getImageData(0, 0, w, h)
+              const found = jsQR(img.data, w, h)
+              if (found && found.data) maybeRedeem(found.data)
             }
           }
         } catch {
@@ -163,7 +192,7 @@ export default function ScanPage() {
         )}
         {cameraState === 'unsupported' && (
           <p style={{ fontSize: 12.5, color: 'var(--text-muted, #9a99a2)', marginTop: 6 }}>
-            This browser can't scan QR codes — type the code below instead (Chrome on Android scans natively).
+            This browser has no camera access — type the code below instead.
           </p>
         )}
         {cameraState === 'denied' && (
