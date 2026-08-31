@@ -70,6 +70,13 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [sectionsDraft, setSectionsDraft] = useState([]) // [{section_label,row_label,capacity,table_count,seats_per_table}]
   const [savingSections, setSavingSections] = useState(false)
 
+  // Per-ticket-type reserved-seats view (expander, assigned pools only)
+  const [seatsOpenId, setSeatsOpenId] = useState(null)
+  const [seatsData, setSeatsData] = useState(null) // null = loading
+  const [selectedSeats, setSelectedSeats] = useState([]) // seat ids
+  const [reserveLabel, setReserveLabel] = useState('Press')
+  const [savingSeats, setSavingSeats] = useState(false)
+
   // Comp-only areas
   const [compForm, setCompForm] = useState({ name: '', capacity: '' })
   const [creatingComp, setCreatingComp] = useState(false)
@@ -322,8 +329,102 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   const poolFor = (t) => (categories || []).find((c) => c.id === t.seating_category_id) || null
 
+  // ---------- Reserved seats (assigned pools) ----------
+
+  const openSeatsView = (t) => {
+    const pool = poolFor(t)
+    if (!pool) return
+    setSectionsOpenId(null) // one expander at a time
+    setSeatsOpenId(t.id)
+    setSeatsData(null)
+    setSelectedSeats([])
+    api
+      .listPoolSeats(eventId, pool.id)
+      .then(setSeatsData)
+      .catch((e) => {
+        onToast(e.message, true)
+        setSeatsOpenId(null)
+      })
+  }
+
+  const toggleSeat = (seat) => {
+    if (seat.status === 'sold' || seat.status === 'held') return
+    setSelectedSeats((prev) => (prev.includes(seat.id) ? prev.filter((x) => x !== seat.id) : [...prev, seat.id]))
+  }
+
+  const selectedStatuses = (seatsData || []).filter((s) => selectedSeats.includes(s.id)).map((s) => s.status)
+  const canReserve = selectedSeats.length > 0 && selectedStatuses.every((s) => s === 'available')
+  const canRelease = selectedSeats.length > 0 && selectedStatuses.every((s) => s === 'reserved')
+
+  const applySeats = async (t, action) => {
+    const pool = poolFor(t)
+    if (!pool) return
+    setSavingSeats(true)
+    try {
+      const view =
+        action === 'reserve'
+          ? await api.blockSeats(eventId, pool.id, selectedSeats, reserveLabel.trim())
+          : await api.unblockSeats(eventId, pool.id, selectedSeats)
+      setSeatsData(view)
+      onToast(
+        action === 'reserve'
+          ? `${selectedSeats.length} seat${selectedSeats.length === 1 ? '' : 's'} reserved${reserveLabel.trim() ? ` for ${reserveLabel.trim()}` : ''} — off sale immediately`
+          : `${selectedSeats.length} seat${selectedSeats.length === 1 ? '' : 's'} released — back on sale`
+      )
+      setSelectedSeats([])
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingSeats(false)
+    }
+  }
+
+  const seatChipStyle = (seat, isSelected) => {
+    const base = {
+      minWidth: 34,
+      padding: '6px 4px',
+      borderRadius: 6,
+      fontSize: 12,
+      fontFamily: 'inherit',
+      textAlign: 'center',
+      cursor: seat.status === 'sold' || seat.status === 'held' ? 'not-allowed' : 'pointer',
+      border: '1px solid var(--border)',
+      background: 'var(--bg)',
+      color: 'var(--text)',
+    }
+    if (seat.status === 'sold' || seat.status === 'held') {
+      return { ...base, background: 'var(--surface-alt)', color: 'var(--text-muted)', textDecoration: 'line-through' }
+    }
+    if (seat.status === 'reserved') {
+      return {
+        ...base,
+        background: isSelected ? 'var(--warning)' : 'transparent',
+        border: '1px dashed var(--warning)',
+        color: isSelected ? '#fff' : 'var(--text)',
+        fontWeight: 600,
+      }
+    }
+    // available
+    return isSelected ? { ...base, background: 'var(--accent-dark)', borderColor: 'var(--accent-dark)', color: '#fff' } : base
+  }
+
+  const seatGroups = (seats) => {
+    const groups = []
+    const byKey = {}
+    for (const s of seats) {
+      const key = `${s.section_label}||${s.row_label || ''}`
+      if (!byKey[key]) {
+        byKey[key] = { section_label: s.section_label, row_label: s.row_label, seats: [] }
+        groups.push(byKey[key])
+      }
+      byKey[key].seats.push(s)
+    }
+    return groups
+  }
+
   const openSectionsEditor = (t) => {
     const pool = poolFor(t)
+    setSeatsOpenId(null) // one expander at a time
     setSectionsOpenId(t.id)
     setSectionsDraft(
       (pool?.sections || []).map((sx) => ({
@@ -795,6 +896,14 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                               Sections
                             </button>
                           )}
+                          {pool && pool.sales_grain === 'seat' && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (seatsOpenId === t.id ? setSeatsOpenId(null) : openSeatsView(t))}
+                            >
+                              Seats
+                            </button>
+                          )}
                           <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(t)}>
                             {t.is_active ? 'Deactivate' : 'Activate'}
                           </button>
@@ -898,6 +1007,84 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
                             Saving re-derives the pool capacity and keeps the ticket quantity in step.
                           </p>
+                        </td>
+                      </tr>
+                    )}
+                    {seatsOpenId === t.id && (
+                      <tr>
+                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
+                            {t.name} — reserved seats
+                          </div>
+                          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
+                            Click seats, then reserve them with a label (&ldquo;Press&rdquo;) — reserved seats
+                            can&apos;t be bought until released. Buyers just see them as unavailable.
+                          </p>
+                          {seatsData === null ? (
+                            <p style={{ fontSize: 13 }}>Loading seats…</p>
+                          ) : seatsData.length === 0 ? (
+                            <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                              No seats yet — save this type&apos;s sections first.
+                            </p>
+                          ) : (
+                            <>
+                              {seatGroups(seatsData).map((g) => (
+                                <div key={`${g.section_label}|${g.row_label}`} style={{ marginBottom: 10 }}>
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                    Section {g.section_label}
+                                    {g.row_label ? ` · ${g.row_label}` : ''}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                    {g.seats.map((s) => (
+                                      <button
+                                        key={s.id}
+                                        type="button"
+                                        style={seatChipStyle(s, selectedSeats.includes(s.id))}
+                                        title={
+                                          s.status === 'reserved'
+                                            ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
+                                            : `${s.label} — ${s.status}`
+                                        }
+                                        onClick={() => toggleSeat(s)}
+                                      >
+                                        {s.seat_number}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+                                <input
+                                  placeholder="Label (Press, Sponsor…)"
+                                  style={{ width: 170 }}
+                                  value={reserveLabel}
+                                  onChange={(e) => setReserveLabel(e.target.value)}
+                                />
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  type="button"
+                                  disabled={!canReserve || savingSeats}
+                                  onClick={() => applySeats(t, 'reserve')}
+                                >
+                                  {savingSeats ? 'Saving…' : `Reserve${selectedSeats.length ? ` ${selectedSeats.length}` : ''}`}
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  type="button"
+                                  disabled={!canRelease || savingSeats}
+                                  onClick={() => applySeats(t, 'release')}
+                                >
+                                  Release{canRelease ? ` ${selectedSeats.length}` : ''}
+                                </button>
+                                <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSeatsOpenId(null)}>
+                                  Close
+                                </button>
+                                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                  Solid = pick to reserve · dashed = reserved (pick to release) · struck = sold or in a cart
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </td>
                       </tr>
                     )}

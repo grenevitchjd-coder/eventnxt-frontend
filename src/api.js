@@ -128,6 +128,18 @@ export const api = {
     }),
   deleteSeatingCategory: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
+  listPoolSeats: (eventId, categoryId) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}/seats`),
+  blockSeats: (eventId, categoryId, seatIds, label) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}/seats/block`, {
+      method: 'POST',
+      body: JSON.stringify({ seat_ids: seatIds, label: label || null }),
+    }),
+  unblockSeats: (eventId, categoryId, seatIds) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}/seats/unblock`, {
+      method: 'POST',
+      body: JSON.stringify({ seat_ids: seatIds }),
+    }),
   replaceZoneSections: (eventId, categoryId, sections) =>
     request(`/events/${eventId}/seating-categories/${categoryId}/sections`, {
       method: 'PUT',
