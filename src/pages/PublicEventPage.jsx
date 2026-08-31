@@ -315,6 +315,11 @@ export default function PublicEventPage() {
                   <div key={t.id} className="ticket-picker-row">
                     <div className="ticket-picker-info">
                       <div className="ticket-picker-name">{t.name}</div>
+                      {(t.admits || 1) > 1 && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          admits {t.admits} people each
+                        </div>
+                      )}
                       {t.description && <div className="ticket-picker-desc">{t.description}</div>}
                       <div className="ticket-picker-price">
                         {t.price_cents === 0 ? 'Free' : money(t.price_cents, t.currency)}

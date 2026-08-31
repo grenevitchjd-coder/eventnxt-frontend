@@ -32,6 +32,8 @@ const EMPTY_COMPOSER = {
   max_per_order: '10',
   basis: 'area', // 'area' | 'row' | 'table'
   area_capacity: '',
+  admits: '1', // area basis: codes minted per purchased unit (packs)
+  sell_by: 'seat', // table basis: 'seat' | 'table' (whole-table purchase)
   assigned: false,
   row_label: '',
   section_names: '', // comma-separated: "A, B"
@@ -45,6 +47,7 @@ const EMPTY_EDIT = {
   price: '',
   quantity: '',
   max_per_order: '',
+  admits: '1',
   description: '',
 }
 
@@ -120,6 +123,31 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     }, 0)
   }
 
+  // Purchasable UNITS + codes minted per unit, per basis:
+  // area: units typed, admits typed (packs); pool holds units × admits heads.
+  // row: 1 seat = 1 unit.
+  // table sold by seat: heads = units. sold by table: unit = one whole
+  // table (uniform seats/table required), admits = that seat count.
+  const composerUnits = () => {
+    const total = composerTotal()
+    if (composer.basis === 'area') return Number(composer.area_capacity) || 0
+    if (composer.basis === 'table' && composer.sell_by === 'table')
+      return parsedSections.reduce((sum, name) => sum + (Number((composer.section_tables[name] || {}).tables) || 0), 0)
+    return total
+  }
+  const composerAdmits = () => {
+    if (composer.basis === 'area') return Math.max(1, parseInt(composer.admits, 10) || 1)
+    if (composer.basis === 'table' && composer.sell_by === 'table') {
+      const seatCounts = parsedSections.map((name) => Number((composer.section_tables[name] || {}).seats) || 0)
+      return seatCounts[0] || 1
+    }
+    return 1
+  }
+  const tableSeatsUniform = () => {
+    const seatCounts = parsedSections.map((name) => Number((composer.section_tables[name] || {}).seats) || 0)
+    return seatCounts.every((x) => x === seatCounts[0])
+  }
+
   const buildSectionsPayload = () => {
     if (composer.basis === 'row')
       return parsedSections.map((name) => ({
@@ -138,6 +166,16 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     })
   }
 
+  // Name is buyer-facing only — for row/table bases it can be left blank
+  // and we compose one from the structure ("Row 1 — Sections A, B").
+  const autoName = () => {
+    const secs = parsedSections.join(', ')
+    if (composer.basis === 'row')
+      return `${composer.row_label || 'Row'} — Section${parsedSections.length > 1 ? 's' : ''} ${secs}`
+    if (composer.basis === 'table') return `Tables — Section${parsedSections.length > 1 ? 's' : ''} ${secs}`
+    return ''
+  }
+
   const handleCompose = async (e) => {
     e.preventDefault()
     const total = composerTotal()
@@ -149,13 +187,22 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       onToast('List at least one section (e.g. "A, B").', true)
       return
     }
+    if (composer.basis === 'table' && composer.sell_by === 'table' && !tableSeatsUniform()) {
+      onToast('Selling whole tables needs the same seats-per-table in every section — split into separate ticket types instead.', true)
+      return
+    }
+    const ttName = composer.name.trim() || autoName()
+    if (!ttName) {
+      onToast('Give this ticket type a name.', true)
+      return
+    }
     setCreating(true)
     try {
       // 1. The seating pool behind this ticket type
       const grain = composer.basis === 'area' ? 'ga' : composer.basis === 'table' ? 'table' : composer.assigned ? 'seat' : 'row'
       const pool = await api.createSeatingCategory(eventId, {
-        name: composer.name,
-        capacity: composer.basis === 'area' ? total : 1, // non-area: derived from sections next
+        name: ttName,
+        capacity: composer.basis === 'area' ? composerUnits() * composerAdmits() : 1, // heads; non-area derived from sections next
         sales_grain: grain,
         row_label: composer.basis === 'row' ? composer.row_label || null : null,
         // pool-level table math is a placeholder — the real per-section
@@ -169,10 +216,11 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       }
       // 3. The ticket type, inventory = the derived total
       const created = await api.createTicketType(eventId, {
-        name: composer.name,
+        name: ttName,
         description: null,
         price_cents: dollarsToCents(composer.price || '0'),
-        quantity: total,
+        quantity: composerUnits(),
+        admits: composerAdmits(),
         max_per_order: parseInt(composer.max_per_order, 10) || 10,
         seating_category_id: pool.id,
         sales_start: null,
@@ -180,7 +228,11 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         is_active: true,
         sort_order: 0,
       })
-      onToast(`"${created.name}" created — ${total} seats`)
+      onToast(
+        composerAdmits() > 1
+          ? `"${created.name}" created — ${composerUnits()} for sale, each admits ${composerAdmits()} (${total} seats)`
+          : `"${created.name}" created — ${total} seats`
+      )
       setComposer(EMPTY_COMPOSER)
       loadEventData()
     } catch (err) {
@@ -198,6 +250,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     price_cents: dollarsToCents(f.price || '0'),
     quantity: parseInt(f.quantity, 10),
     max_per_order: parseInt(f.max_per_order, 10) || 10,
+    admits: Math.max(1, parseInt(f.admits, 10) || (existing.admits ?? 1)),
     seating_category_id: existing.seating_category_id || null,
     sales_start: existing.sales_start || null,
     sales_end: existing.sales_end || null,
@@ -209,6 +262,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     setEditingId(t.id)
     setEditForm({
       name: t.name,
+      admits: String(t.admits || 1),
       price: centsToDollars(t.price_cents),
       quantity: String(t.quantity),
       max_per_order: String(t.max_per_order),
@@ -301,7 +355,9 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
           {
             name: t.name,
             price: centsToDollars(t.price_cents),
-            quantity: String(updatedPool.capacity),
+            quantity: String(
+              (t.admits || 1) > 1 ? Math.max(1, Math.floor(updatedPool.capacity / (t.admits || 1))) : updatedPool.capacity
+            ),
             max_per_order: String(t.max_per_order),
             description: t.description || '',
           },
@@ -397,8 +453,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                 <label htmlFor="tt-name">Name</label>
                 <input
                   id="tt-name"
-                  required
-                  placeholder={composer.basis === 'area' ? 'VIP' : composer.basis === 'row' ? 'Row 1 — Sections A–B' : 'Sponsor tables'}
+                  required={composer.basis === 'area'}
+                  placeholder={composer.basis === 'area' ? 'VIP' : autoName() || 'Leave blank to auto-name'}
                   value={composer.name}
                   onChange={(e) => setComposer({ ...composer, name: e.target.value })}
                 />
@@ -442,8 +498,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
             {composer.basis === 'area' && (
               <div className="inline-form" style={{ marginTop: 4 }}>
-                <div className="field" style={{ width: 130 }}>
-                  <label htmlFor="tt-area-cap">Capacity</label>
+                <div className="field" style={{ width: 150 }}>
+                  <label htmlFor="tt-area-cap">{Number(composer.admits) > 1 ? 'Quantity for sale' : 'Capacity'}</label>
                   <input
                     id="tt-area-cap"
                     type="number"
@@ -453,6 +509,21 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     onChange={(e) => setComposer({ ...composer, area_capacity: e.target.value })}
                   />
                 </div>
+                <div className="field" style={{ width: 110 }}>
+                  <label htmlFor="tt-admits">Each admits</label>
+                  <input
+                    id="tt-admits"
+                    type="number"
+                    min={1}
+                    value={composer.admits}
+                    onChange={(e) => setComposer({ ...composer, admits: e.target.value })}
+                  />
+                </div>
+                {Number(composer.admits) > 1 && Number(composer.area_capacity) > 0 && (
+                  <span style={{ alignSelf: 'flex-end', paddingBottom: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    = {Number(composer.area_capacity) * Math.max(1, parseInt(composer.admits, 10) || 1)} people
+                  </span>
+                )}
               </div>
             )}
 
@@ -518,6 +589,26 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               </div>
             )}
 
+            {composer.basis === 'table' && (
+              <div className="inline-form" style={{ marginTop: 4 }}>
+                <div className="field" style={{ width: 200 }}>
+                  <label htmlFor="tt-sellby">Sold by</label>
+                  <select
+                    id="tt-sellby"
+                    value={composer.sell_by}
+                    onChange={(e) => setComposer({ ...composer, sell_by: e.target.value })}
+                  >
+                    <option value="seat">Individual seat</option>
+                    <option value="table">Whole table</option>
+                  </select>
+                </div>
+                {composer.sell_by === 'table' && (
+                  <span style={{ alignSelf: 'flex-end', paddingBottom: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    price is per table — one purchase admits the whole table
+                  </span>
+                )}
+              </div>
+            )}
             {composer.basis === 'table' && parsedSections.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
@@ -568,7 +659,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
               <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                 {composerTotal() > 0
-                  ? `Total: ${composerTotal()} seats${composer.basis !== 'area' && parsedSections.length ? ` across ${parsedSections.length} section${parsedSections.length === 1 ? '' : 's'}` : ''}`
+                  ? `Total: ${composerAdmits() > 1 ? `${composerUnits()} for sale × admits ${composerAdmits()} = ` : ''}${composerTotal()} seats${composer.basis !== 'area' && parsedSections.length ? ` across ${parsedSections.length} section${parsedSections.length === 1 ? '' : 's'}` : ''}`
                   : 'Total appears as you fill in capacities'}
               </span>
               <button className="btn btn-secondary" type="submit" disabled={creating}>
@@ -644,7 +735,17 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                             onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
                           />
                         </td>
-                        <td colSpan={4}></td>
+                        <td>
+                          <input
+                            type="number"
+                            min={1}
+                            title="Each purchased unit admits this many people"
+                            style={{ width: 60 }}
+                            value={editForm.admits}
+                            onChange={(e) => setEditForm({ ...editForm, admits: e.target.value })}
+                          />
+                        </td>
+                        <td colSpan={3}></td>
                         <td className="actions-cell">
                           <button className="btn btn-secondary btn-sm" disabled={savingEdit} onClick={() => saveEdit(t)}>
                             Save
@@ -664,6 +765,11 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           {pool && pool.sales_grain === 'seat' && (
                             <span className="pill pill-confirmed" style={{ fontSize: 10.5 }}>
                               assigned seats
+                            </span>
+                          )}
+                          {(t.admits || 1) > 1 && (
+                            <span className="pill pill-pending" style={{ fontSize: 10.5, marginLeft: 4 }}>
+                              admits {t.admits}
                             </span>
                           )}
                         </td>
