@@ -67,6 +67,8 @@ export default function PublicEventPage() {
   const [seatMaps, setSeatMaps] = useState({})
   const [seatPicks, setSeatPicks] = useState({})
   const [pickDraft, setPickDraft] = useState({})
+  // Sectioned unassigned types: the buyer's chosen section per ticket type.
+  const [sectionChoice, setSectionChoice] = useState({})
   const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
@@ -234,6 +236,25 @@ export default function PublicEventPage() {
 
   const qtyFor = (t) => (t.assigned_seating ? (seatPicks[t.id] || []).length : quantities[t.id] || 0)
 
+  const chosenSection = (t) => (t.sections || []).find((x) => x.id === sectionChoice[t.id]) || null
+
+  const unitCap = (t) => {
+    let cap = Math.min(t.max_per_order, t.available)
+    if (t.section_required) {
+      const sec = chosenSection(t)
+      if (!sec) return 0
+      cap = Math.min(cap, Math.floor(sec.remaining / (t.admits || 1)))
+    }
+    return cap
+  }
+
+  const refreshTicketTypes = () => {
+    fetch(`${API_URL}/public/events/${slug}/ticket-types`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((tts) => tts && setTicketTypes(tts))
+      .catch(() => {})
+  }
+
   const totalQty = (ticketTypes || []).reduce((a, t) => a + qtyFor(t), 0)
   const totalCents = hasNativeTickets
     ? ticketTypes.reduce((sum, t) => sum + qtyFor(t) * t.price_cents, 0)
@@ -249,7 +270,7 @@ export default function PublicEventPage() {
   const dueCents = totalCents - discountCents
 
   const setQty = (t, next) => {
-    const cap = Math.min(t.max_per_order, t.available)
+    const cap = unitCap(t)
     const clamped = Math.max(0, Math.min(cap, next))
     setQuantities({ ...quantities, [t.id]: clamped })
     setCheckoutError(null)
@@ -286,7 +307,9 @@ export default function PublicEventPage() {
             .map((t) =>
               t.assigned_seating
                 ? { ticket_type_id: t.id, quantity: qtyFor(t), seat_ids: seatPicks[t.id] }
-                : { ticket_type_id: t.id, quantity: quantities[t.id] }
+                : t.section_required
+                  ? { ticket_type_id: t.id, quantity: quantities[t.id], zone_section_id: sectionChoice[t.id] }
+                  : { ticket_type_id: t.id, quantity: quantities[t.id] }
             ),
           promo_code: buyer.promo.trim() || null,
         }),
@@ -304,6 +327,7 @@ export default function PublicEventPage() {
     } catch (err) {
       setCheckoutError(err.message)
       refreshSeatMaps()
+      refreshTicketTypes()
       setCheckingOut(false)
     }
   }
@@ -375,7 +399,7 @@ export default function PublicEventPage() {
             <div className="ticket-picker">
               {ticketTypes.map((t) => {
                 const qty = quantities[t.id] || 0
-                const cap = Math.min(t.max_per_order, t.available)
+                const cap = unitCap(t)
                 return (
                   <div key={t.id} className="ticket-picker-row">
                     <div className="ticket-picker-info">
@@ -397,6 +421,38 @@ export default function PublicEventPage() {
                       <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
                         {qtyFor(t) > 0 ? `${qtyFor(t)} seat${qtyFor(t) === 1 ? '' : 's'} picked` : 'Pick your seats below'}
                       </span>
+                    ) : t.on_sale && t.section_required ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <select
+                          value={sectionChoice[t.id] || ''}
+                          onChange={(e) => {
+                            setSectionChoice({ ...sectionChoice, [t.id]: e.target.value })
+                            setQuantities({ ...quantities, [t.id]: 0 })
+                          }}
+                          aria-label="Section"
+                        >
+                          <option value="">Section…</option>
+                          {(t.sections || []).map((x) => {
+                            const units = Math.floor(x.remaining / (t.admits || 1))
+                            return (
+                              <option key={x.id} value={x.id} disabled={units < 1}>
+                                {x.section_label}
+                                {x.row_label ? ` · ${x.row_label}` : ''}
+                                {units < 1 ? ' — full' : ` · ${units} left`}
+                              </option>
+                            )
+                          })}
+                        </select>
+                        <div className="ticket-qty-stepper">
+                          <button type="button" onClick={() => setQty(t, qtyFor(t) - 1)} disabled={qtyFor(t) === 0} aria-label="fewer">
+                            −
+                          </button>
+                          <span>{qtyFor(t)}</span>
+                          <button type="button" onClick={() => setQty(t, qtyFor(t) + 1)} disabled={!sectionChoice[t.id] || qtyFor(t) >= cap} aria-label="more">
+                            +
+                          </button>
+                        </div>
+                      </div>
                     ) : t.on_sale ? (
                       <div className="ticket-qty-stepper">
                         <button type="button" onClick={() => setQty(t, qty - 1)} disabled={qty === 0} aria-label="fewer">
@@ -444,13 +500,15 @@ export default function PublicEventPage() {
                                 aria-label="Seat"
                               >
                                 <option value="">Seat…</option>
-                                {((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])
-                                  .filter((x) => x.available && !(seatPicks[t.id] || []).includes(x.id))
-                                  .map((x) => (
-                                    <option key={x.id} value={x.id}>
+                                {(((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])).map((x) => {
+                                  const gone = !x.available || (seatPicks[t.id] || []).includes(x.id)
+                                  return (
+                                    <option key={x.id} value={x.id} disabled={gone} style={gone ? { color: '#999' } : undefined}>
                                       Seat {x.seat_number}
+                                      {gone ? ' — taken' : ''}
                                     </option>
-                                  ))}
+                                  )
+                                })}
                               </select>
                               <button
                                 type="button"
@@ -485,35 +543,6 @@ export default function PublicEventPage() {
                                 ))}
                               </div>
                             )}
-                            {/* Schematic map — visual reference */}
-                            <div style={{ marginTop: 10, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                              {seatMaps[t.id].sections.map((sec, i) => (
-                                <div key={i}>
-                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
-                                    {sec.section_label}
-                                    {sec.row_label ? ` · ${sec.row_label}` : ''}
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>
-                                    {sec.seats.map((x) => {
-                                      const picked = (seatPicks[t.id] || []).includes(x.id)
-                                      return (
-                                        <span
-                                          key={x.id}
-                                          title={`Seat ${x.seat_number}${x.available ? '' : ' — taken'}`}
-                                          style={{
-                                            width: 13, height: 13, borderRadius: 3,
-                                            background: picked ? '#534AB7' : x.available ? '#9BD4C3' : '#D8D6D0',
-                                          }}
-                                        />
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                              green = open · gray = taken · purple = yours
-                            </div>
                           </>
                         )}
                       </div>
