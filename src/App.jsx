@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import PublicEventPage from './pages/PublicEventPage'
 import PublicRSVPPage from './pages/PublicRSVPPage'
 import PublicOrderPage from './pages/PublicOrderPage'
+import ScanPage from './pages/ScanPage'
 import { isAuthenticated } from './api'
 
 function RequireAuth({ children }) {
@@ -25,6 +26,15 @@ export default function App() {
         <Route path="/e/:slug/order/:token" element={<PublicOrderPage />} />
         {/* Public — no auth. A specific guest's own RSVP / ticket-distribution link. */}
         <Route path="/rsvp/:token" element={<PublicRSVPPage />} />
+        {/* Auth required — the door scanner, mobile-first. */}
+        <Route
+          path="/checkin/:eventId"
+          element={
+            <RequireAuth>
+              <ScanPage />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/"
           element={

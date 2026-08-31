@@ -154,6 +154,10 @@ export const api = {
     request(`/events/${eventId}/guests/ticket-requests/${requestId}/approve`, { method: 'POST' }),
   denyTicketRequest: (eventId, requestId) =>
     request(`/events/${eventId}/guests/ticket-requests/${requestId}/deny`, { method: 'POST' }),
+  // Door check-in
+  checkInTicket: (eventId, code) =>
+    request(`/events/${eventId}/check-in/${encodeURIComponent(code)}`, { method: 'POST' }),
+  checkInStats: (eventId) => request(`/events/${eventId}/check-in/stats`),
 
   // Event profile (public-facing content + shareable page)
   getEventProfile: (eventId) => request(`/events/${eventId}/profile`, {}, { allow404: true }),

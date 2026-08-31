@@ -184,6 +184,11 @@ export default function Dashboard() {
                 {t.label}
               </button>
             ))}
+            {group.label === 'Manage' && eventId && (
+              <button className="nav-item" onClick={() => window.open(`/checkin/${eventId}`, '_blank')}>
+                Check-in ↗
+              </button>
+            )}
           </div>
         ))}
 

@@ -44,6 +44,18 @@ export default function PublicOrderPage() {
 
   useEffect(load, [token])
 
+  // QR per valid ticket — the scannable version of the same code.
+  useEffect(() => {
+    if (!order || !order.tickets) return
+    order.tickets
+      .filter((t) => t.status === 'valid')
+      .forEach((t) => {
+        QRCode.toDataURL(t.code, { width: 180, margin: 1 })
+          .then((url) => setQrs((q) => ({ ...q, [t.code]: url })))
+          .catch(() => {})
+      })
+  }, [order])
+
   if (error) {
     return (
       <div className="public-event-page">
@@ -126,6 +138,9 @@ export default function PublicOrderPage() {
             <div className="order-ticket-codes">
               {order.tickets.map((t) => (
                 <div key={t.code} className={`order-ticket-code ${t.status !== 'valid' ? 'order-ticket-void' : ''}`}>
+{qrs[t.code] && (
+                    <img src={qrs[t.code]} alt="" style={{ width: 132, height: 132, borderRadius: 8, background: '#fff', padding: 6, alignSelf: 'center' }} />
+                  )}
                   <span className="mono" style={{ fontSize: 16, color: 'var(--text)' }}>
                     {t.code}
                   </span>
