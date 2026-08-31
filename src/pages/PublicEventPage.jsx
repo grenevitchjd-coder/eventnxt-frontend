@@ -414,6 +414,10 @@ export default function PublicEventPage() {
                       <div style={{ flexBasis: '100%', marginTop: 10 }}>
                         {!seatMaps[t.id] ? (
                           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading seats…</span>
+                        ) : seatMaps[t.id].sections.length === 0 ? (
+                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                            Seats for this ticket are still being set up — check back shortly.
+                          </span>
                         ) : (
                           <>
                             {/* Section + seat dropdowns */}
