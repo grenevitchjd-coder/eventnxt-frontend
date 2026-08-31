@@ -62,6 +62,11 @@ export default function PublicEventPage() {
   // natively (external ticket link keeps doing its job, exactly as before).
   const [ticketTypes, setTicketTypes] = useState(null)
   const [quantities, setQuantities] = useState({})
+  // Assigned seating: seat maps by ticket type, the buyer's picked seat
+  // ids, and the in-progress dropdown pair (section index + seat id).
+  const [seatMaps, setSeatMaps] = useState({})
+  const [seatPicks, setSeatPicks] = useState({})
+  const [pickDraft, setPickDraft] = useState({})
   const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
@@ -98,7 +103,20 @@ export default function PublicEventPage() {
 
     fetch(`${API_URL}/public/events/${slug}/ticket-types`)
       .then((res) => (res.ok ? res.json() : []))
-      .then(setTicketTypes)
+      .then((tts) => {
+        setTicketTypes(tts)
+        // Inline (not via the loadSeatMap helper): this closure outlives
+        // the first render, which early-returns before the helper consts
+        // initialize — calling the helper from here is a TDZ crash.
+        tts
+          .filter((t) => t.assigned_seating)
+          .forEach((t) => {
+            fetch(`${API_URL}/public/events/${slug}/ticket-types/${t.id}/seats`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((m) => m && setSeatMaps((prev) => ({ ...prev, [t.id]: m })))
+              .catch(() => {})
+          })
+      })
       .catch(() => setTicketTypes([]))
   }, [slug])
 
@@ -174,9 +192,51 @@ export default function PublicEventPage() {
   }
 
   const hasNativeTickets = Array.isArray(ticketTypes) && ticketTypes.length > 0
-  const totalQty = Object.values(quantities).reduce((a, b) => a + b, 0)
+  const loadSeatMap = (ttId) => {
+    fetch(`${API_URL}/public/events/${slug}/ticket-types/${ttId}/seats`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((map) => map && setSeatMaps((m) => ({ ...m, [ttId]: map })))
+      .catch(() => {})
+  }
+
+  const refreshSeatMaps = () => {
+    ;(ticketTypes || []).filter((t) => t.assigned_seating).forEach((t) => loadSeatMap(t.id))
+  }
+
+  const seatById = (ttId, seatId) => {
+    const map = seatMaps[ttId]
+    if (!map) return null
+    for (const sec of map.sections) {
+      const hit = sec.seats.find((x) => x.id === seatId)
+      if (hit) return { ...hit, section_label: sec.section_label, row_label: sec.row_label }
+    }
+    return null
+  }
+
+  const seatChipLabel = (ttId, seatId) => {
+    const seat = seatById(ttId, seatId)
+    if (!seat) return 'Seat'
+    return `${seat.section_label}${seat.row_label ? ` · ${seat.row_label}` : ''} · #${seat.seat_number}`
+  }
+
+  const addSeatPick = (t) => {
+    const draft = pickDraft[t.id] || {}
+    if (!draft.seat) return
+    const current = seatPicks[t.id] || []
+    if (current.includes(draft.seat) || current.length >= Math.min(t.max_per_order, t.available)) return
+    setSeatPicks({ ...seatPicks, [t.id]: [...current, draft.seat] })
+    setPickDraft({ ...pickDraft, [t.id]: { ...draft, seat: '' } })
+  }
+
+  const removeSeatPick = (ttId, seatId) => {
+    setSeatPicks({ ...seatPicks, [ttId]: (seatPicks[ttId] || []).filter((x) => x !== seatId) })
+  }
+
+  const qtyFor = (t) => (t.assigned_seating ? (seatPicks[t.id] || []).length : quantities[t.id] || 0)
+
+  const totalQty = (ticketTypes || []).reduce((a, t) => a + qtyFor(t), 0)
   const totalCents = hasNativeTickets
-    ? ticketTypes.reduce((sum, t) => sum + (quantities[t.id] || 0) * t.price_cents, 0)
+    ? ticketTypes.reduce((sum, t) => sum + qtyFor(t) * t.price_cents, 0)
     : 0
   const discountCents = (() => {
     if (!promoInfo?.valid || !promoInfo.discount_type || totalCents === 0) return 0
@@ -222,8 +282,12 @@ export default function PublicEventPage() {
           buyer_name: buyer.name,
           buyer_email: buyer.email,
           items: ticketTypes
-            .filter((t) => (quantities[t.id] || 0) > 0)
-            .map((t) => ({ ticket_type_id: t.id, quantity: quantities[t.id] })),
+            .filter((t) => qtyFor(t) > 0)
+            .map((t) =>
+              t.assigned_seating
+                ? { ticket_type_id: t.id, quantity: qtyFor(t), seat_ids: seatPicks[t.id] }
+                : { ticket_type_id: t.id, quantity: quantities[t.id] }
+            ),
           promo_code: buyer.promo.trim() || null,
         }),
       })
@@ -239,6 +303,7 @@ export default function PublicEventPage() {
       }
     } catch (err) {
       setCheckoutError(err.message)
+      refreshSeatMaps()
       setCheckingOut(false)
     }
   }
@@ -328,7 +393,11 @@ export default function PublicEventPage() {
                         )}
                       </div>
                     </div>
-                    {t.on_sale ? (
+                    {t.on_sale && t.assigned_seating ? (
+                      <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
+                        {qtyFor(t) > 0 ? `${qtyFor(t)} seat${qtyFor(t) === 1 ? '' : 's'} picked` : 'Pick your seats below'}
+                      </span>
+                    ) : t.on_sale ? (
                       <div className="ticket-qty-stepper">
                         <button type="button" onClick={() => setQty(t, qty - 1)} disabled={qty === 0} aria-label="fewer">
                           −
@@ -340,6 +409,110 @@ export default function PublicEventPage() {
                       </div>
                     ) : (
                       <span className="ticket-picker-offsale">{t.available === 0 ? 'Sold out' : 'Not on sale'}</span>
+                    )}
+                    {t.on_sale && t.assigned_seating && (
+                      <div style={{ flexBasis: '100%', marginTop: 10 }}>
+                        {!seatMaps[t.id] ? (
+                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading seats…</span>
+                        ) : (
+                          <>
+                            {/* Section + seat dropdowns */}
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <select
+                                value={(pickDraft[t.id] || {}).section ?? ''}
+                                onChange={(e) =>
+                                  setPickDraft({ ...pickDraft, [t.id]: { section: e.target.value, seat: '' } })
+                                }
+                                aria-label="Section"
+                              >
+                                <option value="">Section…</option>
+                                {seatMaps[t.id].sections.map((sec, i) => (
+                                  <option key={i} value={String(i)}>
+                                    {sec.section_label}
+                                    {sec.row_label ? ` · ${sec.row_label}` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={(pickDraft[t.id] || {}).seat || ''}
+                                onChange={(e) => setPickDraft({ ...pickDraft, [t.id]: { ...(pickDraft[t.id] || {}), seat: e.target.value } })}
+                                disabled={(pickDraft[t.id] || {}).section === undefined || (pickDraft[t.id] || {}).section === ''}
+                                aria-label="Seat"
+                              >
+                                <option value="">Seat…</option>
+                                {((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])
+                                  .filter((x) => x.available && !(seatPicks[t.id] || []).includes(x.id))
+                                  .map((x) => (
+                                    <option key={x.id} value={x.id}>
+                                      Seat {x.seat_number}
+                                    </option>
+                                  ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => addSeatPick(t)}
+                                disabled={!(pickDraft[t.id] || {}).seat || qtyFor(t) >= Math.min(t.max_per_order, t.available)}
+                              >
+                                Add seat
+                              </button>
+                            </div>
+                            {/* Picked chips */}
+                            {(seatPicks[t.id] || []).length > 0 && (
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                                {(seatPicks[t.id] || []).map((sid) => (
+                                  <span
+                                    key={sid}
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5,
+                                      border: '1px solid var(--border, #ccc)', borderRadius: 999, padding: '3px 10px',
+                                    }}
+                                  >
+                                    {seatChipLabel(t.id, sid)}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSeatPick(t.id, sid)}
+                                      aria-label="remove seat"
+                                      style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, fontSize: 14, lineHeight: 1 }}
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {/* Schematic map — visual reference */}
+                            <div style={{ marginTop: 10, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                              {seatMaps[t.id].sections.map((sec, i) => (
+                                <div key={i}>
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                    {sec.section_label}
+                                    {sec.row_label ? ` · ${sec.row_label}` : ''}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', maxWidth: 220 }}>
+                                    {sec.seats.map((x) => {
+                                      const picked = (seatPicks[t.id] || []).includes(x.id)
+                                      return (
+                                        <span
+                                          key={x.id}
+                                          title={`Seat ${x.seat_number}${x.available ? '' : ' — taken'}`}
+                                          style={{
+                                            width: 13, height: 13, borderRadius: 3,
+                                            background: picked ? '#534AB7' : x.available ? '#9BD4C3' : '#D8D6D0',
+                                          }}
+                                        />
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                              green = open · gray = taken · purple = yours
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                 )

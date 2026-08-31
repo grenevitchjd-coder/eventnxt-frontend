@@ -133,6 +133,11 @@ export default function PublicOrderPage() {
                     {t.ticket_type_name}
                     {t.status !== 'valid' ? ' — refunded' : ''}
                   </span>
+                  {t.seat_label && (
+                    <span style={{ fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>
+                      {t.seat_label}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
