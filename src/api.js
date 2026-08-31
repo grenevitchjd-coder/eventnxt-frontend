@@ -128,6 +128,11 @@ export const api = {
     }),
   deleteSeatingCategory: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
+  replaceZoneSections: (eventId, categoryId, sections) =>
+    request(`/events/${eventId}/seating-categories/${categoryId}/sections`, {
+      method: 'PUT',
+      body: JSON.stringify({ sections }),
+    }),
 
   // Guests (per event)
   listGuests: (eventId) => request(`/events/${eventId}/guests`),

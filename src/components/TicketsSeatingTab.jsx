@@ -1,27 +1,20 @@
 // eventnxt-frontend: src/components/TicketsSeatingTab.jsx
 //
-// "Tickets & seating" — ONE place to answer "what am I selling and how
-// much room is there?", replacing the separate Tickets tab and the seating
-// half of the old Event workspace.
-//
-// Under the hood ticket types (what you sell) and seating sections (what
-// physically exists, and the pool comp guests draw from) stay separate
-// models — but the default gesture creates both together: adding
-// "VIP — $150 — 40" makes the ticket type AND a matching 40-seat section
-// in one go. The section dropdown's "Create matching section" default is
-// that gesture; picking an existing section instead covers the shared-pool
-// case (early-bird + regular GA selling into one section).
-//
-// The tab shapes itself to the event's ticketing mode (Event settings):
-//   native      -> everything below
-//   external    -> seating sections + summary only, with a pointer to
-//                  where external sales come in (CSV import)
-//   invite_only -> seating sections + summary only, comp-flavored copy
+// "Tickets & seating" — the BASIS-FIRST composer. A ticket type is the
+// pricing unit; its basis decides what the form asks next:
+//   Named area (GA, VIP, Balcony)  -> one capacity, assigned N/A
+//   By row                         -> row + sections, then a capacity
+//                                     input per section, + assigned toggle
+//   By tables                      -> sections, then tables × seats each
+// Creating a ticket type creates its seating pool + member sections in
+// one gesture (pool capacity derives as the section sum server-side).
+// Pools never sold (press rows, holds) live in the Comp-only areas
+// panel; guest-type priorities point at pools same as ever.
 //
 // Event context (eventId) comes from the Dashboard shell; remounted via
 // key={eventId} on switch.
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api'
 
 function dollarsToCents(v) {
@@ -33,38 +26,50 @@ function centsToDollars(c) {
   return (c / 100).toFixed(2)
 }
 
-const CREATE_MATCHING = '__create_matching__'
+const EMPTY_COMPOSER = {
+  name: '',
+  price: '',
+  max_per_order: '10',
+  basis: 'area', // 'area' | 'row' | 'table'
+  area_capacity: '',
+  assigned: false,
+  row_label: '',
+  section_names: '', // comma-separated: "A, B"
+  // generated per-section inputs, keyed by section name:
+  section_caps: {}, // { A: '25', B: '25' }
+  section_tables: {}, // { A: { tables: '4', seats: '8' } }
+}
 
-const EMPTY_FORM = {
+const EMPTY_EDIT = {
   name: '',
   price: '',
   quantity: '',
-  max_per_order: '10',
-  seating_category_id: CREATE_MATCHING,
+  max_per_order: '',
   description: '',
 }
 
 export default function TicketsSeatingTab({ onToast, eventId }) {
   const [settings, setSettings] = useState(null)
-
   const [ticketTypes, setTicketTypes] = useState(null)
   const [categories, setCategories] = useState(null)
   const [seatingSummary, setSeatingSummary] = useState(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
 
-  // Ticket type create/edit
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [composer, setComposer] = useState(EMPTY_COMPOSER)
   const [creating, setCreating] = useState(false)
+
   const [editingId, setEditingId] = useState(null)
-  const [editForm, setEditForm] = useState(EMPTY_FORM)
+  const [editForm, setEditForm] = useState(EMPTY_EDIT)
   const [savingEdit, setSavingEdit] = useState(false)
 
-  // Seating section create/edit
-  const [catForm, setCatForm] = useState({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
-  const [creatingCat, setCreatingCat] = useState(false)
-  const [editingCatId, setEditingCatId] = useState(null)
-  const [catEditForm, setCatEditForm] = useState({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
-  const [savingCat, setSavingCat] = useState(false)
+  // Per-ticket-type sections editor (expander)
+  const [sectionsOpenId, setSectionsOpenId] = useState(null)
+  const [sectionsDraft, setSectionsDraft] = useState([]) // [{section_label,row_label,capacity,table_count,seats_per_table}]
+  const [savingSections, setSavingSections] = useState(false)
+
+  // Comp-only areas
+  const [compForm, setCompForm] = useState({ name: '', capacity: '' })
+  const [creatingComp, setCreatingComp] = useState(false)
 
   const loadSeatingSummary = () => {
     setLoadingSummary(true)
@@ -87,8 +92,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   // Event context (eventId) comes from the Dashboard shell, which also
   // guarantees it's non-empty before rendering this tab and remounts it
-  // (key={eventId}) when the event changes, so loading once on mount is all
-  // that's needed here.
+  // (key={eventId}) when the event changes, so loading once on mount is
+  // all that's needed here.
   useEffect(() => {
     api
       .getEventSettings(eventId)
@@ -98,53 +103,107 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ---------- Ticket types ----------
+  // ---------- Composer helpers ----------
 
-  // Always send the FULL payload — the backend PUT is a full replace,
-  // same contract as the profile editor.
-  const toPayload = (f, existing = {}) => ({
-    name: f.name,
-    description: f.description || null,
-    price_cents: dollarsToCents(f.price || '0'),
-    quantity: parseInt(f.quantity, 10),
-    max_per_order: parseInt(f.max_per_order, 10) || 10,
-    seating_category_id:
-      f.seating_category_id && f.seating_category_id !== CREATE_MATCHING ? f.seating_category_id : null,
-    sales_start: existing.sales_start || null,
-    sales_end: existing.sales_end || null,
-    is_active: existing.is_active !== undefined ? existing.is_active : true,
-    sort_order: existing.sort_order || 0,
-  })
+  const parsedSections = composer.section_names
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
 
-  const handleCreate = async (e) => {
+  const composerTotal = () => {
+    if (composer.basis === 'area') return Number(composer.area_capacity) || 0
+    if (composer.basis === 'row')
+      return parsedSections.reduce((sum, name) => sum + (Number(composer.section_caps[name]) || 0), 0)
+    return parsedSections.reduce((sum, name) => {
+      const t = composer.section_tables[name] || {}
+      return sum + (Number(t.tables) || 0) * (Number(t.seats) || 0)
+    }, 0)
+  }
+
+  const buildSectionsPayload = () => {
+    if (composer.basis === 'row')
+      return parsedSections.map((name) => ({
+        section_label: name,
+        row_label: composer.row_label || null,
+        capacity: Number(composer.section_caps[name]) || 1,
+      }))
+    return parsedSections.map((name) => {
+      const t = composer.section_tables[name] || {}
+      return {
+        section_label: name,
+        table_count: Number(t.tables) || 1,
+        seats_per_table: Number(t.seats) || 1,
+        capacity: 1, // derived server-side from table math
+      }
+    })
+  }
+
+  const handleCompose = async (e) => {
     e.preventDefault()
+    const total = composerTotal()
+    if (total < 1) {
+      onToast('Fill in the capacities first — the total is still zero.', true)
+      return
+    }
+    if (composer.basis !== 'area' && parsedSections.length === 0) {
+      onToast('List at least one section (e.g. "A, B").', true)
+      return
+    }
     setCreating(true)
     try {
-      let categoryId = form.seating_category_id
-      if (categoryId === CREATE_MATCHING) {
-        // The one-gesture path: a matching section, same name, capacity =
-        // the ticket quantity, so comps and reconciliation work without
-        // the organizer ever thinking about "categories".
-        const cat = await api.createSeatingCategory(eventId, {
-          name: form.name,
-          capacity: parseInt(form.quantity, 10),
-        })
-        categoryId = cat.id
+      // 1. The seating pool behind this ticket type
+      const grain = composer.basis === 'area' ? 'ga' : composer.basis === 'table' ? 'table' : composer.assigned ? 'seat' : 'row'
+      const pool = await api.createSeatingCategory(eventId, {
+        name: composer.name,
+        capacity: composer.basis === 'area' ? total : 1, // non-area: derived from sections next
+        sales_grain: grain,
+        row_label: composer.basis === 'row' ? composer.row_label || null : null,
+        // pool-level table math is a placeholder — the real per-section
+        // math lands in step 2 and derives the true capacity
+        table_count: composer.basis === 'table' ? 1 : null,
+        seats_per_table: composer.basis === 'table' ? 1 : null,
+      })
+      // 2. Member sections (row/table bases)
+      if (composer.basis !== 'area') {
+        await api.replaceZoneSections(eventId, pool.id, buildSectionsPayload())
       }
-      const created = await api.createTicketType(
-        eventId,
-        toPayload({ ...form, seating_category_id: categoryId === CREATE_MATCHING ? '' : categoryId })
-      )
-      setTicketTypes([...(ticketTypes || []), created])
-      setForm(EMPTY_FORM)
-      onToast(`"${created.name}" created`)
-      loadEventData() // sections + summary changed too
+      // 3. The ticket type, inventory = the derived total
+      const created = await api.createTicketType(eventId, {
+        name: composer.name,
+        description: null,
+        price_cents: dollarsToCents(composer.price || '0'),
+        quantity: total,
+        max_per_order: parseInt(composer.max_per_order, 10) || 10,
+        seating_category_id: pool.id,
+        sales_start: null,
+        sales_end: null,
+        is_active: true,
+        sort_order: 0,
+      })
+      onToast(`"${created.name}" created — ${total} seats`)
+      setComposer(EMPTY_COMPOSER)
+      loadEventData()
     } catch (err) {
       onToast(err.message, true)
     } finally {
       setCreating(false)
     }
   }
+
+  // ---------- Ticket type edit / lifecycle (unchanged mechanics) ----------
+
+  const toPayload = (f, existing = {}) => ({
+    name: f.name,
+    description: f.description || null,
+    price_cents: dollarsToCents(f.price || '0'),
+    quantity: parseInt(f.quantity, 10),
+    max_per_order: parseInt(f.max_per_order, 10) || 10,
+    seating_category_id: existing.seating_category_id || null,
+    sales_start: existing.sales_start || null,
+    sales_end: existing.sales_end || null,
+    is_active: existing.is_active !== undefined ? existing.is_active : true,
+    sort_order: existing.sort_order || 0,
+  })
 
   const startEdit = (t) => {
     setEditingId(t.id)
@@ -153,7 +212,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       price: centsToDollars(t.price_cents),
       quantity: String(t.quantity),
       max_per_order: String(t.max_per_order),
-      seating_category_id: t.seating_category_id || '',
       description: t.description || '',
     })
   }
@@ -182,7 +240,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             price: centsToDollars(t.price_cents),
             quantity: String(t.quantity),
             max_per_order: String(t.max_per_order),
-            seating_category_id: t.seating_category_id || '',
             description: t.description || '',
           },
           t
@@ -207,79 +264,102 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     }
   }
 
-  const categoryName = (id) => (categories || []).find((c) => c.id === id)?.name || '—'
+  // ---------- Sections editor (per ticket type) ----------
 
-  const KIND_LABELS = { ga: 'General admission', row: 'Row', table: 'Tables', seat: 'Assigned seats' }
-  const zoneStructure = (c) => {
-    if (c.sales_grain === 'table' && c.table_count) return `${c.table_count} tables × ${c.seats_per_table}`
-    const bits = [c.row_label, c.section_label].filter(Boolean).join(' · ')
-    if (c.sales_grain === 'seat') return bits ? `${bits} · assigned seats` : 'Assigned seats'
-    if (c.sales_grain === 'row') return bits || 'Row'
-    return 'General admission'
+  const poolFor = (t) => (categories || []).find((c) => c.id === t.seating_category_id) || null
+
+  const openSectionsEditor = (t) => {
+    const pool = poolFor(t)
+    setSectionsOpenId(t.id)
+    setSectionsDraft(
+      (pool?.sections || []).map((sx) => ({
+        section_label: sx.section_label,
+        row_label: sx.row_label || '',
+        capacity: String(sx.capacity),
+        table_count: sx.table_count ? String(sx.table_count) : '',
+        seats_per_table: sx.seats_per_table ? String(sx.seats_per_table) : '',
+      }))
+    )
   }
-  const zonePayload = (f) => ({
-    name: f.name,
-    capacity: f.sales_grain === 'table' ? 1 : Number(f.capacity), // derived server-side for tables
-    sales_grain: f.sales_grain,
-    row_label: f.row_label || null,
-    section_label: f.section_label || null,
-    table_count: f.sales_grain === 'table' ? Number(f.table_count) : null,
-    seats_per_table: f.sales_grain === 'table' ? Number(f.seats_per_table) : null,
-  })
 
-  // ---------- Seating sections ----------
+  const saveSections = async (t) => {
+    const pool = poolFor(t)
+    if (!pool) return
+    setSavingSections(true)
+    try {
+      const payload = sectionsDraft.map((d) => ({
+        section_label: d.section_label,
+        row_label: d.row_label || null,
+        capacity: Number(d.capacity) || 1,
+        table_count: d.table_count ? Number(d.table_count) : null,
+        seats_per_table: d.seats_per_table ? Number(d.seats_per_table) : null,
+      }))
+      const updatedPool = await api.replaceZoneSections(eventId, pool.id, payload)
+      // Keep ticket inventory in step with the derived seating total.
+      await api.updateTicketType(eventId, t.id, {
+        ...toPayload(
+          {
+            name: t.name,
+            price: centsToDollars(t.price_cents),
+            quantity: String(updatedPool.capacity),
+            max_per_order: String(t.max_per_order),
+            description: t.description || '',
+          },
+          t
+        ),
+      })
+      onToast(`Sections saved — ${updatedPool.capacity} seats total`)
+      setSectionsOpenId(null)
+      loadEventData()
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingSections(false)
+    }
+  }
 
-  const handleCreateCategory = async (e) => {
+  // ---------- Comp-only areas ----------
+
+  const soldPoolIds = new Set((ticketTypes || []).map((t) => t.seating_category_id).filter(Boolean))
+  const compPools = (categories || []).filter((c) => !soldPoolIds.has(c.id))
+
+  const handleCreateComp = async (e) => {
     e.preventDefault()
-    setCreatingCat(true)
+    setCreatingComp(true)
     try {
-      await api.createSeatingCategory(eventId, zonePayload(catForm))
-      onToast(`"${catForm.name}" added`)
-      setCatForm({ name: '', capacity: '', sales_grain: 'ga', row_label: '', section_label: '', table_count: '', seats_per_table: '' })
+      await api.createSeatingCategory(eventId, { name: compForm.name, capacity: Number(compForm.capacity), sales_grain: 'ga' })
+      onToast(`"${compForm.name}" added`)
+      setCompForm({ name: '', capacity: '' })
       loadEventData()
     } catch (err) {
       onToast(err.message, true)
     } finally {
-      setCreatingCat(false)
+      setCreatingComp(false)
     }
   }
 
-  const startEditCat = (cat) => {
-    setEditingCatId(cat.id)
-    setCatEditForm({
-      name: cat.name,
-      capacity: cat.capacity,
-      sales_grain: cat.sales_grain || 'ga',
-      row_label: cat.row_label || '',
-      section_label: cat.section_label || '',
-      table_count: cat.table_count || '',
-      seats_per_table: cat.seats_per_table || '',
-    })
-  }
-
-  const saveEditCat = async (catId) => {
-    setSavingCat(true)
+  const deleteCompPool = async (c) => {
+    if (!window.confirm(`Delete "${c.name}"? Any guests assigned to it will become unassigned.`)) return
     try {
-      await api.updateSeatingCategory(eventId, catId, zonePayload(catEditForm))
-      onToast('Saved')
-      setEditingCatId(null)
-      loadEventData()
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingCat(false)
-    }
-  }
-
-  const deleteCategory = async (cat) => {
-    if (!window.confirm(`Delete "${cat.name}"? Any guests assigned to it will become unassigned.`)) return
-    try {
-      await api.deleteSeatingCategory(eventId, cat.id)
-      onToast(`"${cat.name}" deleted`)
+      await api.deleteSeatingCategory(eventId, c.id)
+      onToast(`"${c.name}" deleted`)
       loadEventData()
     } catch (err) {
       onToast(err.message, true)
     }
+  }
+
+  const sectionSummaryLine = (pool) => {
+    if (!pool) return null
+    if (pool.sections && pool.sections.length > 0)
+      return pool.sections
+        .map((sx) =>
+          sx.table_count
+            ? `${sx.section_label}: ${sx.table_count}×${sx.seats_per_table}`
+            : `${sx.section_label}: ${sx.capacity}`
+        )
+        .join(' · ')
+    return null
   }
 
   const inputStyle = {
@@ -302,28 +382,28 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       <div className="page-title">Tickets &amp; seating</div>
       <p className="page-subtitle">
         {selling
-          ? 'What you sell and how much room there is. Adding a ticket type creates a matching seating section by default — pick an existing section instead when two ticket types share one pool.'
+          ? 'Ticket types are your prices. Pick the basis — a named area, rows, or tables — and the form asks for exactly the structure that basis needs.'
           : mode === 'external'
-            ? "Tickets for this event sell on your external platform — here you define the room itself: seating sections and capacity, which power the guest list, comps, and the reconciliation below. External sales come in via CSV import (Promos & referrals)."
-            : 'This event is invite-only — no public sales. Seating sections and capacity here power the guest list, comps, and the reconciliation below.'}
+            ? 'Tickets for this event sell on your external platform — here you define the room itself, which powers the guest list, comps, and reconciliation. External sales come in via CSV import (Promos & referrals).'
+            : 'This event is invite-only — no public sales. The areas here power the guest list, comps, and the reconciliation below.'}
       </p>
 
       {selling && (
-        <>
-          <div className="panel">
-            <div className="panel-title">Add a ticket type</div>
-            <form className="inline-form" onSubmit={handleCreate}>
-              <div className="field" style={{ flex: 1, minWidth: 160 }}>
+        <div className="panel">
+          <div className="panel-title">Add a ticket type</div>
+          <form onSubmit={handleCompose}>
+            <div className="inline-form">
+              <div className="field" style={{ flex: 1, minWidth: 170 }}>
                 <label htmlFor="tt-name">Name</label>
                 <input
                   id="tt-name"
                   required
-                  placeholder="General Admission"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder={composer.basis === 'area' ? 'VIP' : composer.basis === 'row' ? 'Row 1 — Sections A–B' : 'Sponsor tables'}
+                  value={composer.name}
+                  onChange={(e) => setComposer({ ...composer, name: e.target.value })}
                 />
               </div>
-              <div className="field" style={{ width: 110 }}>
+              <div className="field" style={{ width: 100 }}>
                 <label htmlFor="tt-price">Price ($)</label>
                 <input
                   id="tt-price"
@@ -331,400 +411,458 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   type="number"
                   min={0}
                   step="0.01"
-                  placeholder="20.00"
-                  value={form.price}
-                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  value={composer.price}
+                  onChange={(e) => setComposer({ ...composer, price: e.target.value })}
                 />
+              </div>
+              <div className="field">
+                <label htmlFor="tt-basis">Priced by</label>
+                <select
+                  id="tt-basis"
+                  style={inputStyle}
+                  value={composer.basis}
+                  onChange={(e) => setComposer({ ...composer, basis: e.target.value })}
+                >
+                  <option value="area">Named area (GA, VIP, Balcony…)</option>
+                  <option value="row">Row</option>
+                  <option value="table">Tables</option>
+                </select>
               </div>
               <div className="field" style={{ width: 100 }}>
-                <label htmlFor="tt-qty">Quantity</label>
-                <input
-                  id="tt-qty"
-                  required
-                  type="number"
-                  min={0}
-                  value={form.quantity}
-                  onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ width: 110 }}>
                 <label htmlFor="tt-max">Max / order</label>
                 <input
                   id="tt-max"
                   type="number"
                   min={1}
-                  value={form.max_per_order}
-                  onChange={(e) => setForm({ ...form, max_per_order: e.target.value })}
+                  value={composer.max_per_order}
+                  onChange={(e) => setComposer({ ...composer, max_per_order: e.target.value })}
                 />
               </div>
-              <div className="field">
-                <label htmlFor="tt-cat">Seating section</label>
-                <select
-                  id="tt-cat"
-                  style={inputStyle}
-                  value={form.seating_category_id}
-                  onChange={(e) => setForm({ ...form, seating_category_id: e.target.value })}
-                >
-                  <option value={CREATE_MATCHING}>Create matching section</option>
-                  <option value="">None (no shared pool)</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button className="btn btn-secondary" type="submit" disabled={creating}>
-                Add ticket type
-              </button>
-            </form>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-              Price $0 makes a free/comp ticket — buyers get it instantly, no payment step. A $0.00 price
-              is the intended way to run &ldquo;Free — RSVP required&rdquo; tickets.
-            </p>
-          </div>
-
-          <table className="data-table" style={{ marginBottom: 28 }}>
-            <thead>
-              <tr>
-                <th>Ticket type</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Sold</th>
-                <th>Held</th>
-                <th>Avail.</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {ticketTypes.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="empty-state">
-                    No ticket types yet — the public page shows the external ticket link (if set) until
-                    one exists here.
-                  </td>
-                </tr>
-              ) : (
-                ticketTypes.map((t) =>
-                  editingId === t.id ? (
-                    <tr key={t.id}>
-                      <td>
-                        <input
-                          style={{ width: '100%' }}
-                          value={editForm.name}
-                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        />
-                        <input
-                          style={{ width: '100%', marginTop: 6 }}
-                          placeholder="Description (optional)"
-                          value={editForm.description}
-                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          style={{ width: 80 }}
-                          value={editForm.price}
-                          onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          style={{ width: 70 }}
-                          value={editForm.quantity}
-                          onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
-                        />
-                      </td>
-                      <td colSpan={3}>
-                        <select
-                          style={inputStyle}
-                          value={editForm.seating_category_id}
-                          onChange={(e) => setEditForm({ ...editForm, seating_category_id: e.target.value })}
-                        >
-                          <option value="">No seating section</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td></td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={savingEdit}
-                          onClick={() => saveEdit(t)}
-                        >
-                          Save
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr key={t.id}>
-                      <td>
-                        <div>{t.name}</div>
-                        {t.seating_category_id && (
-                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            Pool: {categoryName(t.seating_category_id)}
-                          </div>
-                        )}
-                      </td>
-                      <td className="mono">{t.price_cents === 0 ? 'Free' : `$${centsToDollars(t.price_cents)}`}</td>
-                      <td className="mono">{t.quantity}</td>
-                      <td className="mono">{t.sold}</td>
-                      <td className="mono">{t.held}</td>
-                      <td className="mono">{t.available}</td>
-                      <td>
-                        <span className={`pill pill-${t.is_active ? 'confirmed' : 'pending'}`}>
-                          {t.is_active ? 'on sale' : 'inactive'}
-                        </span>
-                      </td>
-                      <td className="actions-cell">
-                        <button className="btn btn-secondary btn-sm" onClick={() => startEdit(t)}>
-                          Edit
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(t)}>
-                          {t.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(t)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )
-              )}
-            </tbody>
-          </table>
-        </>
-      )}
-
-      {/* ---------- Seating sections — the room itself ---------- */}
-      <div className="panel">
-        <div className="panel-title">Add a seating section</div>
-        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
-          {selling
-            ? 'For sections that aren\u2019t sold as their own ticket type — e.g. a reserved comp/press area. (Sections for sold tickets are created automatically by the form above.)'
-            : 'Sections and their capacity — the pools your guest types\u2019 seating priorities draw from.'}
-        </p>
-        <form className="inline-form" onSubmit={handleCreateCategory}>
-          <div className="field" style={{ minWidth: 160 }}>
-            <label htmlFor="cat-name">Name</label>
-            <input
-              id="cat-name"
-              required
-              placeholder="Row 1 — all sections"
-              value={catForm.name}
-              onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="cat-kind">Structure</label>
-            <select
-              id="cat-kind"
-              value={catForm.sales_grain}
-              onChange={(e) => setCatForm({ ...catForm, sales_grain: e.target.value })}
-            >
-              <option value="ga">General admission (pool)</option>
-              <option value="row">Row — unassigned</option>
-              <option value="seat">Row — assigned seats</option>
-              <option value="table">Tables</option>
-            </select>
-          </div>
-          {catForm.sales_grain === 'table' ? (
-            <>
-              <div className="field" style={{ width: 90 }}>
-                <label htmlFor="cat-tables">Tables</label>
-                <input
-                  id="cat-tables"
-                  type="number"
-                  min={1}
-                  required
-                  value={catForm.table_count}
-                  onChange={(e) => setCatForm({ ...catForm, table_count: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ width: 110 }}>
-                <label htmlFor="cat-tseats">Seats / table</label>
-                <input
-                  id="cat-tseats"
-                  type="number"
-                  min={1}
-                  required
-                  value={catForm.seats_per_table}
-                  onChange={(e) => setCatForm({ ...catForm, seats_per_table: e.target.value })}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="field">
-              <label htmlFor="cat-capacity">{catForm.sales_grain === 'ga' ? 'Capacity' : 'Seats'}</label>
-              <input
-                id="cat-capacity"
-                type="number"
-                min={1}
-                required
-                style={{ minWidth: 90 }}
-                value={catForm.capacity}
-                onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })}
-              />
             </div>
-          )}
-          {(catForm.sales_grain === 'row' || catForm.sales_grain === 'seat') && (
-            <>
-              <div className="field" style={{ width: 110 }}>
-                <label htmlFor="cat-row">Row label</label>
-                <input
-                  id="cat-row"
-                  placeholder="Row 1"
-                  value={catForm.row_label}
-                  onChange={(e) => setCatForm({ ...catForm, row_label: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ width: 130 }}>
-                <label htmlFor="cat-section">Section(s)</label>
-                <input
-                  id="cat-section"
-                  placeholder="All sections"
-                  value={catForm.section_label}
-                  onChange={(e) => setCatForm({ ...catForm, section_label: e.target.value })}
-                />
-              </div>
-            </>
-          )}
-          <button className="btn btn-secondary" type="submit" disabled={creatingCat}>
-            Add section
-          </button>
-        </form>
-      </div>
 
-      <table className="data-table" style={{ marginBottom: 28 }}>
-        <thead>
-          <tr>
-            <th>Zone</th>
-            <th>Structure</th>
-            <th>Capacity</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {categories.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="empty-state">
-                No seating zones yet.
-              </td>
-            </tr>
-          ) : (
-            categories.map((c) =>
-              editingCatId === c.id ? (
-                <tr key={c.id}>
-                  <td>
+            {composer.basis === 'area' && (
+              <div className="inline-form" style={{ marginTop: 4 }}>
+                <div className="field" style={{ width: 130 }}>
+                  <label htmlFor="tt-area-cap">Capacity</label>
+                  <input
+                    id="tt-area-cap"
+                    type="number"
+                    min={1}
+                    required
+                    value={composer.area_capacity}
+                    onChange={(e) => setComposer({ ...composer, area_capacity: e.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+
+            {composer.basis !== 'area' && (
+              <div className="inline-form" style={{ marginTop: 4 }}>
+                {composer.basis === 'row' && (
+                  <div className="field" style={{ width: 130 }}>
+                    <label htmlFor="tt-row">Row</label>
                     <input
-                      value={catEditForm.name}
-                      onChange={(e) => setCatEditForm({ ...catEditForm, name: e.target.value })}
-                      style={{ width: '100%' }}
+                      id="tt-row"
+                      placeholder="Row 1"
+                      value={composer.row_label}
+                      onChange={(e) => setComposer({ ...composer, row_label: e.target.value })}
                     />
-                    {(catEditForm.sales_grain === 'row' || catEditForm.sales_grain === 'seat') && (
-                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                        <input
-                          placeholder="Row label"
-                          style={{ width: 90 }}
-                          value={catEditForm.row_label}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, row_label: e.target.value })}
-                        />
-                        <input
-                          placeholder="Section(s)"
-                          style={{ width: 110 }}
-                          value={catEditForm.section_label}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, section_label: e.target.value })}
-                        />
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <select
-                      value={catEditForm.sales_grain}
-                      onChange={(e) => setCatEditForm({ ...catEditForm, sales_grain: e.target.value })}
-                    >
-                      <option value="ga">GA</option>
-                      <option value="row">Row</option>
-                      <option value="seat">Assigned</option>
-                      <option value="table">Tables</option>
-                    </select>
-                  </td>
-                  <td>
-                    {catEditForm.sales_grain === 'table' ? (
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                        <input
-                          type="number"
-                          min={1}
-                          style={{ width: 55 }}
-                          value={catEditForm.table_count}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, table_count: e.target.value })}
-                        />
-                        ×
-                        <input
-                          type="number"
-                          min={1}
-                          style={{ width: 55 }}
-                          value={catEditForm.seats_per_table}
-                          onChange={(e) => setCatEditForm({ ...catEditForm, seats_per_table: e.target.value })}
-                        />
-                      </div>
-                    ) : (
+                  </div>
+                )}
+                <div className="field" style={{ flex: 1, minWidth: 170 }}>
+                  <label htmlFor="tt-sections">Sections (comma-separated)</label>
+                  <input
+                    id="tt-sections"
+                    placeholder="A, B"
+                    value={composer.section_names}
+                    onChange={(e) => setComposer({ ...composer, section_names: e.target.value })}
+                  />
+                </div>
+              </div>
+            )}
+
+            {composer.basis === 'row' && parsedSections.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Seats per section
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  {parsedSections.map((name) => (
+                    <div className="field" key={name} style={{ width: 130 }}>
+                      <label>
+                        {composer.row_label ? `${composer.row_label} · ` : ''}Section {name}
+                      </label>
                       <input
                         type="number"
                         min={1}
-                        value={catEditForm.capacity}
-                        onChange={(e) => setCatEditForm({ ...catEditForm, capacity: e.target.value })}
-                        style={{ width: 80 }}
+                        required
+                        value={composer.section_caps[name] || ''}
+                        onChange={(e) =>
+                          setComposer({
+                            ...composer,
+                            section_caps: { ...composer.section_caps, [name]: e.target.value },
+                          })
+                        }
                       />
+                    </div>
+                  ))}
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, paddingBottom: 10, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={composer.assigned}
+                      onChange={(e) => setComposer({ ...composer, assigned: e.target.checked })}
+                    />
+                    Assigned seating
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {composer.basis === 'table' && parsedSections.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Tables per section
+                </div>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  {parsedSections.map((name) => {
+                    const t = composer.section_tables[name] || { tables: '', seats: '' }
+                    return (
+                      <div key={name} style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                        <div className="field" style={{ width: 85 }}>
+                          <label>Sec {name} tables</label>
+                          <input
+                            type="number"
+                            min={1}
+                            required
+                            value={t.tables}
+                            onChange={(e) =>
+                              setComposer({
+                                ...composer,
+                                section_tables: { ...composer.section_tables, [name]: { ...t, tables: e.target.value } },
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="field" style={{ width: 95 }}>
+                          <label>Seats / table</label>
+                          <input
+                            type="number"
+                            min={1}
+                            required
+                            value={t.seats}
+                            onChange={(e) =>
+                              setComposer({
+                                ...composer,
+                                section_tables: { ...composer.section_tables, [name]: { ...t, seats: e.target.value } },
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                {composerTotal() > 0
+                  ? `Total: ${composerTotal()} seats${composer.basis !== 'area' && parsedSections.length ? ` across ${parsedSections.length} section${parsedSections.length === 1 ? '' : 's'}` : ''}`
+                  : 'Total appears as you fill in capacities'}
+              </span>
+              <button className="btn btn-secondary" type="submit" disabled={creating}>
+                {creating ? 'Creating…' : 'Create ticket type'}
+              </button>
+            </div>
+          </form>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+            Price $0 makes a free/comp ticket — buyers get it instantly, no payment step.
+          </p>
+        </div>
+      )}
+
+      {selling && (
+        <table className="data-table" style={{ marginBottom: 28 }}>
+          <thead>
+            <tr>
+              <th>Ticket type</th>
+              <th>Price</th>
+              <th>Qty</th>
+              <th>Sold</th>
+              <th>Held</th>
+              <th>Avail.</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ticketTypes.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="empty-state">
+                  No ticket types yet — the public page shows the external ticket link (if set) until one
+                  exists here.
+                </td>
+              </tr>
+            ) : (
+              ticketTypes.map((t) => {
+                const pool = poolFor(t)
+                const breakdown = sectionSummaryLine(pool)
+                return (
+                  <Fragment key={t.id}>
+                    {editingId === t.id ? (
+                      <tr>
+                        <td>
+                          <input
+                            style={{ width: '100%' }}
+                            value={editForm.name}
+                            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                          />
+                          <input
+                            style={{ width: '100%', marginTop: 6 }}
+                            placeholder="Description (optional)"
+                            value={editForm.description}
+                            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            style={{ width: 80 }}
+                            value={editForm.price}
+                            onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            style={{ width: 70 }}
+                            value={editForm.quantity}
+                            onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                          />
+                        </td>
+                        <td colSpan={4}></td>
+                        <td className="actions-cell">
+                          <button className="btn btn-secondary btn-sm" disabled={savingEdit} onClick={() => saveEdit(t)}>
+                            Save
+                          </button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <td>
+                          <div>{t.name}</div>
+                          {breakdown && (
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{breakdown}</div>
+                          )}
+                          {pool && pool.sales_grain === 'seat' && (
+                            <span className="pill pill-confirmed" style={{ fontSize: 10.5 }}>
+                              assigned seats
+                            </span>
+                          )}
+                        </td>
+                        <td className="mono">{t.price_cents === 0 ? 'Free' : `$${centsToDollars(t.price_cents)}`}</td>
+                        <td className="mono">{t.quantity}</td>
+                        <td className="mono">{t.sold}</td>
+                        <td className="mono">{t.held}</td>
+                        <td className="mono">{t.available}</td>
+                        <td>
+                          <span className={`pill pill-${t.is_active ? 'confirmed' : 'pending'}`}>
+                            {t.is_active ? 'on sale' : 'inactive'}
+                          </span>
+                        </td>
+                        <td className="actions-cell">
+                          <button className="btn btn-secondary btn-sm" onClick={() => startEdit(t)}>
+                            Edit
+                          </button>
+                          {pool && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (sectionsOpenId === t.id ? setSectionsOpenId(null) : openSectionsEditor(t))}
+                            >
+                              Sections
+                            </button>
+                          )}
+                          <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(t)}>
+                            {t.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(t)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    {sectionsOpenId === t.id && (
+                      <tr>
+                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
+                            {t.name} — sections
+                          </div>
+                          {sectionsDraft.length === 0 && (
+                            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 0 }}>
+                              No breakdown yet — add sections to split this pool.
+                            </p>
+                          )}
+                          {sectionsDraft.map((d, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                              <input
+                                placeholder="Section"
+                                style={{ width: 90 }}
+                                value={d.section_label}
+                                onChange={(e) =>
+                                  setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, section_label: e.target.value } : x)))
+                                }
+                              />
+                              <input
+                                placeholder="Row"
+                                style={{ width: 80 }}
+                                value={d.row_label}
+                                onChange={(e) =>
+                                  setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, row_label: e.target.value } : x)))
+                                }
+                              />
+                              {d.table_count || d.seats_per_table ? (
+                                <>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    placeholder="Tables"
+                                    style={{ width: 70 }}
+                                    value={d.table_count}
+                                    onChange={(e) =>
+                                      setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, table_count: e.target.value } : x)))
+                                    }
+                                  />
+                                  ×
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    placeholder="Seats"
+                                    style={{ width: 70 }}
+                                    value={d.seats_per_table}
+                                    onChange={(e) =>
+                                      setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, seats_per_table: e.target.value } : x)))
+                                    }
+                                  />
+                                </>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={1}
+                                  placeholder="Seats"
+                                  style={{ width: 80 }}
+                                  value={d.capacity}
+                                  onChange={(e) =>
+                                    setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, capacity: e.target.value } : x)))
+                                  }
+                                />
+                              )}
+                              <button
+                                className="btn btn-danger btn-sm"
+                                type="button"
+                                onClick={() => setSectionsDraft(sectionsDraft.filter((_, j) => j !== i))}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              type="button"
+                              onClick={() =>
+                                setSectionsDraft([...sectionsDraft, { section_label: '', row_label: '', capacity: '', table_count: '', seats_per_table: '' }])
+                              }
+                            >
+                              + Add section
+                            </button>
+                            <button className="btn btn-primary btn-sm" type="button" disabled={savingSections} onClick={() => saveSections(t)}>
+                              {savingSections ? 'Saving…' : 'Save sections'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSectionsOpenId(null)}>
+                              Close
+                            </button>
+                          </div>
+                          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+                            Saving re-derives the pool capacity and keeps the ticket quantity in step.
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      )}
+
+      {/* ---------- Comp-only areas — never sold ---------- */}
+      <div className="panel">
+        <div className="panel-title">Comp-only areas</div>
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+          {selling
+            ? 'Areas that are never sold — a press row, a hold. Guest types\u2019 seating priorities can point here just like anywhere else.'
+            : 'The areas of your room — guest types\u2019 seating priorities draw from these.'}
+        </p>
+        <form className="inline-form" onSubmit={handleCreateComp}>
+          <div className="field">
+            <label htmlFor="comp-name">Name</label>
+            <input
+              id="comp-name"
+              required
+              placeholder="Press row"
+              value={compForm.name}
+              onChange={(e) => setCompForm({ ...compForm, name: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="comp-capacity">Capacity</label>
+            <input
+              id="comp-capacity"
+              type="number"
+              min={1}
+              required
+              style={{ minWidth: 90 }}
+              value={compForm.capacity}
+              onChange={(e) => setCompForm({ ...compForm, capacity: e.target.value })}
+            />
+          </div>
+          <button className="btn btn-secondary" type="submit" disabled={creatingComp}>
+            Add area
+          </button>
+        </form>
+        {compPools.length > 0 && (
+          <table className="data-table" style={{ marginTop: 12 }}>
+            <tbody>
+              {compPools.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    {c.name}
+                    {sectionSummaryLine(c) && (
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{sectionSummaryLine(c)}</div>
                     )}
                   </td>
-                  <td className="actions-cell">
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={savingCat}
-                      onClick={() => saveEditCat(c.id)}
-                    >
-                      Save
-                    </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setEditingCatId(null)}>
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{zoneStructure(c)}</td>
                   <td className="mono">{c.capacity}</td>
                   <td className="actions-cell">
-                    <button className="btn btn-secondary btn-sm" onClick={() => startEditCat(c)}>
-                      Edit
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={() => deleteCategory(c)}>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteCompPool(c)}>
                       Delete
                     </button>
                   </td>
                 </tr>
-              )
-            )
-          )}
-        </tbody>
-      </table>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
-      {/* ---------- Seating Summary — capacity/box office/guest list reconciliation ---------- */}
+      {/* ---------- Seating Summary — reconciliation ---------- */}
       <div className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="panel-title" style={{ margin: 0 }}>
@@ -735,20 +873,19 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
           </button>
         </div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 14 }}>
-          A live reconciliation across every source — box office sales are matched by ticket type
-          against each section&apos;s name. &ldquo;Confirmed avail.&rdquo; mirrors the real capacity check;
-          &ldquo;estimated avail.&rdquo; is the more conservative number, also subtracting pending
-          guest-list holds and box office sales.
+          A live reconciliation across every source — box office sales are matched by ticket type against
+          each pool&apos;s name. &ldquo;Confirmed avail.&rdquo; mirrors the real capacity check;
+          &ldquo;estimated avail.&rdquo; also subtracts pending guest-list holds and box office sales.
         </p>
         {seatingSummary === null ? (
           <p style={{ fontSize: 13 }}>Loading…</p>
         ) : seatingSummary.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No seating sections yet.</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nothing to reconcile yet.</p>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>Section</th>
+                <th>Area</th>
                 <th>Capacity</th>
                 <th>Box office</th>
                 <th>Allotted</th>
@@ -758,17 +895,26 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               </tr>
             </thead>
             <tbody>
-              {seatingSummary.map((row) => (
-                <tr key={row.category_id}>
-                  <td>{row.category_name}</td>
-                  <td className="mono">{row.capacity}</td>
-                  <td className="mono">{row.box_office}</td>
-                  <td className="mono">{row.allotted}</td>
-                  <td className="mono">{row.committed}</td>
-                  <td className="mono">{row.confirmed_avail}</td>
-                  <td className="mono">{row.estimated_avail}</td>
-                </tr>
-              ))}
+              {seatingSummary.map((row) => {
+                const pool = (categories || []).find((c) => c.id === row.category_id)
+                const breakdown = sectionSummaryLine(pool)
+                return (
+                  <tr key={row.category_id}>
+                    <td>
+                      {row.category_name}
+                      {breakdown && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{breakdown}</div>
+                      )}
+                    </td>
+                    <td className="mono">{row.capacity}</td>
+                    <td className="mono">{row.box_office}</td>
+                    <td className="mono">{row.allotted}</td>
+                    <td className="mono">{row.committed}</td>
+                    <td className="mono">{row.confirmed_avail}</td>
+                    <td className="mono">{row.estimated_avail}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
