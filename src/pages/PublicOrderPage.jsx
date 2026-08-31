@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import QRCode from 'qrcode'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
 
@@ -30,6 +31,7 @@ const STATUS_COPY = {
 export default function PublicOrderPage() {
   const { slug, token } = useParams()
   const [order, setOrder] = useState(undefined) // undefined = loading
+  const [qrs, setQrs] = useState({}) // ticket code -> QR data URL
   const [error, setError] = useState(false)
 
   const load = () => {
