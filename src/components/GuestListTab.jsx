@@ -90,6 +90,12 @@ export default function GuestListTab({ onToast, eventId }) {
   const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
   const [savingGuestAllotment, setSavingGuestAllotment] = useState(false)
 
+  // Reserved-seat assignment (guests in an assigned-seating area)
+  const [seatsGuestId, setSeatsGuestId] = useState(null)
+  const [guestSeatMap, setGuestSeatMap] = useState(null) // null = loading
+  const [guestSeatSel, setGuestSeatSel] = useState([])
+  const [savingGuestSeats, setSavingGuestSeats] = useState(false)
+
   // ---- CSV/Excel import ----
   const fileInputRef = useRef(null)
   const [stagedRows, setStagedRows] = useState(null) // null = no batch staged
@@ -286,6 +292,7 @@ export default function GuestListTab({ onToast, eventId }) {
       return
     }
     setExpandedAllotmentGuestId(guest.id)
+    setSeatsGuestId(null) // one expander at a time
     setAllotmentDraftRows(guest.ticket_allotment || [])
     setNewAllotmentDay({ date: '', quantity: '' })
   }
@@ -515,6 +522,95 @@ export default function GuestListTab({ onToast, eventId }) {
 
   const categoryName = (id) => categories?.find((c) => c.id === id)?.name || '—'
   const guestTypeName = (id) => guestTypes?.find((t) => t.id === id)?.name || 'unknown'
+
+  // ---------- Reserved-seat assignment ----------
+
+  const catFor = (g) => categories?.find((c) => c.id === g.seating_category_id) || null
+  const seatAssignable = (g) => catFor(g)?.sales_grain === 'seat'
+
+  const openGuestSeats = (g) => {
+    setExpandedAllotmentGuestId(null) // one expander at a time
+    setSeatsGuestId(g.id)
+    setGuestSeatMap(null)
+    setGuestSeatSel([])
+    api
+      .listPoolSeats(loadedEventId, g.seating_category_id)
+      .then((seatList) => {
+        setGuestSeatMap(seatList)
+        setGuestSeatSel(seatList.filter((s) => s.guest_id === g.id).map((s) => s.id))
+      })
+      .catch((e) => {
+        onToast(e.message, true)
+        setSeatsGuestId(null)
+      })
+  }
+
+  const guestSeatSelectable = (g, s) => {
+    if (s.guest_id === g.id) return true // theirs — can deselect to release
+    if (s.guest_id) return false // another guest's
+    return s.status === 'available' || s.status === 'reserved'
+  }
+
+  const toggleGuestSeat = (g, s) => {
+    if (!guestSeatSelectable(g, s)) return
+    setGuestSeatSel((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
+  }
+
+  const saveGuestSeats = async (g) => {
+    setSavingGuestSeats(true)
+    try {
+      const res = await api.setGuestSeats(loadedEventId, g.id, guestSeatSel)
+      setGuestSeatMap(res.seats)
+      setGuests(guests.map((x) => (x.id === g.id ? res.guest : x)))
+      onToast(
+        guestSeatSel.length
+          ? `${guestSeatSel.length} seat${guestSeatSel.length === 1 ? '' : 's'} assigned to ${g.name}`
+          : `${g.name}'s seats released — they stay reserved`
+      )
+      setSeatsGuestId(null)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingGuestSeats(false)
+    }
+  }
+
+  const guestSeatChipStyle = (g, s, isSelected) => {
+    const base = {
+      minWidth: 34,
+      padding: '6px 4px',
+      borderRadius: 6,
+      fontSize: 12,
+      fontFamily: 'inherit',
+      textAlign: 'center',
+      border: '1px solid var(--border)',
+      background: 'var(--surface)',
+      color: 'var(--text)',
+      cursor: guestSeatSelectable(g, s) ? 'pointer' : 'not-allowed',
+    }
+    if (s.status === 'sold' || s.status === 'held')
+      return { ...base, background: 'var(--surface-alt)', color: 'var(--text-muted)', textDecoration: 'line-through' }
+    if (s.guest_id && s.guest_id !== g.id)
+      return { ...base, background: 'var(--surface-alt)', color: 'var(--text-muted)', border: '1px dashed var(--warning)' }
+    if (isSelected)
+      return { ...base, background: 'var(--accent-dark)', borderColor: 'var(--accent-dark)', color: '#fff', fontWeight: 600 }
+    if (s.status === 'reserved') return { ...base, border: '1px dashed var(--warning)', fontWeight: 600 }
+    return base
+  }
+
+  const guestSeatGroups = (seatList) => {
+    const groups = []
+    const byKey = {}
+    for (const s of seatList) {
+      const key = `${s.section_label}||${s.row_label || ''}`
+      if (!byKey[key]) {
+        byKey[key] = { section_label: s.section_label, row_label: s.row_label, seats: [] }
+        groups.push(byKey[key])
+      }
+      byKey[key].seats.push(s)
+    }
+    return groups
+  }
 
   const copyRsvpLink = async (guest) => {
     try {
@@ -1131,7 +1227,17 @@ export default function GuestListTab({ onToast, eventId }) {
                         </td>
                         <td className="mono">{g.email}</td>
                         <td>{guestTypeName(g.guest_type_id)}</td>
-                        <td>{g.seating_category_id ? categoryName(g.seating_category_id) : '—'}</td>
+                        <td>
+                          {g.seating_category_id ? categoryName(g.seating_category_id) : '—'}
+                          {(g.seat_labels || []).length > 0 && (
+                            <div
+                              title={g.seat_labels.join('\n')}
+                              style={{ fontSize: 11.5, color: 'var(--text-muted)', cursor: 'help' }}
+                            >
+                              {g.seat_labels.length} seat{g.seat_labels.length === 1 ? '' : 's'} assigned
+                            </div>
+                          )}
+                        </td>
                         <td>
                           <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
                         </td>
@@ -1172,12 +1278,88 @@ export default function GuestListTab({ onToast, eventId }) {
                           <button className="btn btn-secondary btn-sm" onClick={() => toggleAllotmentPanel(g)}>
                             Tickets
                           </button>
+                          {seatAssignable(g) && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (seatsGuestId === g.id ? setSeatsGuestId(null) : openGuestSeats(g))}
+                            >
+                              Seats
+                            </button>
+                          )}
                           <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
                             Edit
                           </button>
                           <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
                             Delete
                           </button>
+                        </td>
+                      </tr>
+                    )}
+                    {seatsGuestId === g.id && (
+                      <tr>
+                        <td></td>
+                        <td colSpan={8} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                          <div style={{ background: 'var(--surface-alt)', borderRadius: 8, padding: '12px 14px' }}>
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                              {g.name}&apos;s seats in {categoryName(g.seating_category_id)} — party of {g.party_size}
+                              , {guestSeatSel.length} selected. Assigning takes seats off sale; deselecting
+                              releases them from {g.name} but keeps them reserved. Their ticket codes update
+                              to show the seat.
+                            </div>
+                            {guestSeatMap === null ? (
+                              <p style={{ fontSize: 13 }}>Loading seats…</p>
+                            ) : guestSeatMap.length === 0 ? (
+                              <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                No seats in this area yet — set up its sections on Tickets &amp; seating first.
+                              </p>
+                            ) : (
+                              <>
+                                {guestSeatGroups(guestSeatMap).map((grp) => (
+                                  <div key={`${grp.section_label}|${grp.row_label}`} style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                      Section {grp.section_label}
+                                      {grp.row_label ? ` · ${grp.row_label}` : ''}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                      {grp.seats.map((s) => (
+                                        <button
+                                          key={s.id}
+                                          type="button"
+                                          style={guestSeatChipStyle(g, s, guestSeatSel.includes(s.id))}
+                                          title={
+                                            s.guest_id && s.guest_id !== g.id
+                                              ? `${s.label} — assigned to ${s.guest_name || 'another guest'}`
+                                              : s.status === 'reserved'
+                                                ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
+                                                : `${s.label} — ${s.status}`
+                                          }
+                                          onClick={() => toggleGuestSeat(g, s)}
+                                        >
+                                          {s.seat_number}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <button
+                                    className="btn btn-primary btn-sm"
+                                    type="button"
+                                    disabled={savingGuestSeats}
+                                    onClick={() => saveGuestSeats(g)}
+                                  >
+                                    {savingGuestSeats ? 'Saving…' : `Save seats (${guestSeatSel.length})`}
+                                  </button>
+                                  <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSeatsGuestId(null)}>
+                                    Cancel
+                                  </button>
+                                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                    Solid = pick · dashed = reserved hold · greyed dashed = another guest&apos;s · struck = sold
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )}

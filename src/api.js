@@ -130,6 +130,11 @@ export const api = {
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
   listPoolSeats: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}/seats`),
+  setGuestSeats: (eventId, guestId, seatIds) =>
+    request(`/events/${eventId}/guests/${guestId}/seats`, {
+      method: 'PUT',
+      body: JSON.stringify({ seat_ids: seatIds }),
+    }),
   blockSeats: (eventId, categoryId, seatIds, label) =>
     request(`/events/${eventId}/seating-categories/${categoryId}/seats/block`, {
       method: 'POST',
