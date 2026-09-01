@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { loadGoogleFont, SocialIcon, platformLabel } from '../socialAndFonts'
 
@@ -194,6 +194,34 @@ export default function PublicEventPage() {
   }
 
   const hasNativeTickets = Array.isArray(ticketTypes) && ticketTypes.length > 0
+
+  // Multi-day grouping: whole-event passes first, then each day in
+
+  // order. Single-day events (no dated types) keep the flat list.
+
+  const orderedTypes = ticketTypes
+
+    ? [...ticketTypes].sort((a, b) => String(a.valid_date || '') < String(b.valid_date || '') ? -1 : String(a.valid_date || '') > String(b.valid_date || '') ? 1 : 0)
+
+    : []
+
+  const anyDated = orderedTypes.some((t) => t.valid_date)
+
+  const dayLabel = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+
+  const headingFor = (t, i) => {
+
+    if (!anyDated) return null
+
+    const prev = i > 0 ? orderedTypes[i - 1].valid_date || '' : undefined
+
+    const cur = t.valid_date || ''
+
+    if (prev === cur) return null
+
+    return cur ? dayLabel(cur) : 'All days'
+
+  }
   const loadSeatMap = (ttId) => {
     fetch(`${API_URL}/public/events/${slug}/ticket-types/${ttId}/seats`)
       .then((res) => (res.ok ? res.json() : null))
@@ -397,11 +425,19 @@ export default function PublicEventPage() {
               Tickets
             </h2>
             <div className="ticket-picker">
-              {ticketTypes.map((t) => {
+              {orderedTypes.map((t, ti) => {
                 const qty = quantities[t.id] || 0
                 const cap = unitCap(t)
                 return (
-                  <div key={t.id} className="ticket-picker-row">
+                  <Fragment key={t.id}>
+                    {headingFor(t, ti) && (
+                      <div
+                        style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-muted)', margin: '14px 0 2px' }}
+                      >
+                        {headingFor(t, ti)}
+                      </div>
+                    )}
+                  <div className="ticket-picker-row">
                     <div className="ticket-picker-info">
                       <div className="ticket-picker-name">{t.name}</div>
                       {(t.admits || 1) > 1 && (
@@ -548,6 +584,7 @@ export default function PublicEventPage() {
                       </div>
                     )}
                   </div>
+                  </Fragment>
                 )
               })}
             </div>

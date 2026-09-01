@@ -128,6 +128,8 @@ export const api = {
     }),
   deleteSeatingCategory: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
+  fanOutTicketType: (eventId, ticketTypeId) =>
+    request(`/events/${eventId}/ticket-types/${ticketTypeId}/fan-out`, { method: 'POST' }),
   listPoolSeats: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}/seats`),
   setGuestSeats: (eventId, guestId, seatIds) =>

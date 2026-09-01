@@ -29,6 +29,8 @@ function centsToDollars(c) {
 const EMPTY_COMPOSER = {
   name: '',
   price: '',
+  valid_date: '', // per_day/mixed spans: '' = whole event (mixed only); a date = that day
+  every_day: true, // fan the created type out to every event day (uniform pricing/seating)
   max_per_order: '10',
   basis: 'area', // 'area' | 'row' | 'table'
   area_capacity: '',
@@ -77,6 +79,19 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [reserveLabel, setReserveLabel] = useState('Press')
   const [savingSeats, setSavingSeats] = useState(false)
   const [eventSettings, setEventSettings] = useState(null)
+  const eventDays = (() => {
+    if (!eventSettings || !eventSettings.first_day || !eventSettings.last_day) return []
+    if (!['per_day', 'mixed'].includes(eventSettings.ticket_span)) return []
+    const out = []
+    const d = new Date(eventSettings.first_day + 'T12:00:00')
+    const last = new Date(eventSettings.last_day + 'T12:00:00')
+    while (d <= last && out.length < 60) {
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+      d.setDate(d.getDate() + 1)
+    }
+    return out
+  })()
+  const fmtDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
 
   // Comp-only areas
   const [compForm, setCompForm] = useState({ name: '', capacity: '' })
@@ -224,6 +239,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         await api.replaceZoneSections(eventId, pool.id, buildSectionsPayload())
       }
       // 3. The ticket type, inventory = the derived total
+      const chosenDay = eventDays.length ? composer.valid_date || (eventSettings.ticket_span === 'per_day' ? eventDays[0] : '') : ''
       const created = await api.createTicketType(eventId, {
         name: ttName,
         description: null,
@@ -232,11 +248,16 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         admits: composerAdmits(),
         max_per_order: parseInt(composer.max_per_order, 10) || 10,
         seating_category_id: pool.id,
+        valid_date: chosenDay || null,
         sales_start: null,
         sales_end: null,
         is_active: true,
         sort_order: 0,
       })
+      if (chosenDay && composer.every_day && eventDays.length > 1) {
+        const clones = await api.fanOutTicketType(eventId, created.id)
+        if (clones.length) onToast(`Cloned to ${clones.length} more day${clones.length === 1 ? '' : 's'} — same setup, independent inventory`)
+      }
       onToast(
         composerAdmits() > 1
           ? `"${created.name}" created — ${composerUnits()} for sale, each admits ${composerAdmits()} (${total} seats)`
@@ -593,6 +614,37 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   onChange={(e) => setComposer({ ...composer, price: e.target.value })}
                 />
               </div>
+              {eventDays.length > 0 && (
+                <div className="field">
+                  <label htmlFor="tt-day">Day</label>
+                  <select
+                    id="tt-day"
+                    style={inputStyle}
+                    value={composer.valid_date}
+                    onChange={(e) => setComposer({ ...composer, valid_date: e.target.value })}
+                  >
+                    {eventSettings.ticket_span === 'mixed' && <option value="">All days (whole-event package)</option>}
+                    {eventSettings.ticket_span === 'per_day' && !composer.valid_date && (
+                      <option value="">Choose a day…</option>
+                    )}
+                    {eventDays.map((d) => (
+                      <option key={d} value={d}>
+                        {fmtDay(d)}
+                      </option>
+                    ))}
+                  </select>
+                  {composer.valid_date && eventDays.length > 1 && (
+                    <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                      <input
+                        type="checkbox"
+                        checked={composer.every_day}
+                        onChange={(e) => setComposer({ ...composer, every_day: e.target.checked })}
+                      />
+                      Create for every day (same setup, independent inventory per day)
+                    </label>
+                  )}
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="tt-basis">Priced by</label>
                 <select
@@ -880,7 +932,19 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     ) : (
                       <tr>
                         <td>
-                          <div>{t.name}</div>
+                          <div>
+                            {t.name}
+                            {t.valid_date && (
+                              <span className="pill pill-pending" style={{ marginLeft: 6, fontSize: 10.5 }}>
+                                {fmtDay(t.valid_date)}
+                              </span>
+                            )}
+                            {!t.valid_date && eventSettings?.ticket_span === 'mixed' && (
+                              <span className="pill pill-confirmed" style={{ marginLeft: 6, fontSize: 10.5 }}>
+                                all days
+                              </span>
+                            )}
+                          </div>
                           {breakdown && (
                             <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{breakdown}</div>
                           )}
