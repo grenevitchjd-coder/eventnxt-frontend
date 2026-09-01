@@ -70,6 +70,7 @@ export default function GuestListTab({ onToast, eventId }) {
     email: '',
     guest_type_id: '',
     seating_category_id: '',
+    section_label: '',
     allocation_status: 'confirmed',
     party_size: 1,
     perks: '',
@@ -146,6 +147,7 @@ export default function GuestListTab({ onToast, eventId }) {
         email: guestForm.email,
         guest_type_id: guestForm.guest_type_id,
         seating_category_id: guestForm.seating_category_id || null,
+        section_label: (guestForm.seating_category_id && guestForm.section_label) || null,
         allocation_status: guestForm.allocation_status,
         party_size: Number(guestForm.party_size) || 1,
         perks: guestForm.perks || null,
@@ -158,6 +160,7 @@ export default function GuestListTab({ onToast, eventId }) {
         email: '',
         guest_type_id: '',
         seating_category_id: '',
+        section_label: '',
         allocation_status: 'confirmed',
         party_size: 1,
         perks: '',
@@ -179,6 +182,7 @@ export default function GuestListTab({ onToast, eventId }) {
       email: guest.email,
       guest_type_id: guest.guest_type_id,
       seating_category_id: guest.seating_category_id || '',
+      section_label: guest.section_label || '',
       allocation_status: guest.allocation_status,
       party_size: guest.party_size || 1,
       perks: guest.perks || '',
@@ -195,6 +199,7 @@ export default function GuestListTab({ onToast, eventId }) {
         email: guestEditForm.email,
         guest_type_id: guestEditForm.guest_type_id,
         seating_category_id: guestEditForm.seating_category_id || null,
+        section_label: (guestEditForm.seating_category_id && guestEditForm.section_label) || null,
         allocation_status: guestEditForm.allocation_status,
         party_size: Number(guestEditForm.party_size) || 1,
         perks: guestEditForm.perks || null,
@@ -527,6 +532,11 @@ export default function GuestListTab({ onToast, eventId }) {
 
   const catFor = (g) => categories?.find((c) => c.id === g.seating_category_id) || null
   const seatAssignable = (g) => catFor(g)?.sales_grain === 'seat'
+  // Unique section labels of a pool, for section-level placement selects
+  const sectionLabelsOf = (categoryId) => {
+    const c = categories?.find((x) => x.id === categoryId)
+    return [...new Set((c?.sections || []).map((s) => s.section_label))]
+  }
 
   const openGuestSeats = (g) => {
     setExpandedAllotmentGuestId(null) // one expander at a time
@@ -714,6 +724,23 @@ export default function GuestListTab({ onToast, eventId }) {
                   ))}
                 </select>
               </div>
+              {sectionLabelsOf(guestForm.seating_category_id).length > 0 && (
+                <div className="field">
+                  <label htmlFor="g-section">Section</label>
+                  <select
+                    id="g-section"
+                    value={guestForm.section_label}
+                    onChange={(e) => setGuestForm({ ...guestForm, section_label: e.target.value })}
+                  >
+                    <option value="">Anywhere in this area</option>
+                    {sectionLabelsOf(guestForm.seating_category_id).map((lbl) => (
+                      <option key={lbl} value={lbl}>
+                        Section {lbl}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="g-status">Status</label>
                 <select
@@ -1125,6 +1152,21 @@ export default function GuestListTab({ onToast, eventId }) {
                               </option>
                             ))}
                           </select>
+                          {sectionLabelsOf(guestEditForm.seating_category_id).length > 0 && (
+                            <select
+                              style={{ ...selectStyle, marginTop: 4 }}
+                              title="Section"
+                              value={guestEditForm.section_label}
+                              onChange={(e) => setGuestEditForm({ ...guestEditForm, section_label: e.target.value })}
+                            >
+                              <option value="">Anywhere in this area</option>
+                              {sectionLabelsOf(guestEditForm.seating_category_id).map((lbl) => (
+                                <option key={lbl} value={lbl}>
+                                  Section {lbl}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </td>
                         <td>
                           <select
@@ -1229,6 +1271,9 @@ export default function GuestListTab({ onToast, eventId }) {
                         <td>{guestTypeName(g.guest_type_id)}</td>
                         <td>
                           {g.seating_category_id ? categoryName(g.seating_category_id) : '—'}
+                          {g.section_label && (
+                            <span style={{ color: 'var(--text-muted)' }}> · Sec {g.section_label}</span>
+                          )}
                           {(g.seat_labels || []).length > 0 && (
                             <div
                               title={g.seat_labels.join('\n')}

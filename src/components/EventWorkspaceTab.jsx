@@ -29,6 +29,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   const [expandedTypeId, setExpandedTypeId] = useState(null)
   const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
   const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
+  const [addPrioritySection, setAddPrioritySection] = useState('')
   const [addingPriority, setAddingPriority] = useState(false)
   // Ticket allotment defaults (per-day), edited inline in the accordion
   const [ticketAllotments, setTicketAllotments] = useState({}) // guestTypeId -> [{date, quantity}]
@@ -115,6 +116,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     }
     setExpandedTypeId(typeId)
     setAddPriorityCategoryId('')
+    setAddPrioritySection('')
     setNewAllotmentDay({ date: '', quantity: '' })
     if (!priorityLists[typeId]) {
       api
@@ -161,14 +163,23 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     }
   }
 
+  const sectionLabelsOf = (categoryId) => {
+    const c = (categories || []).find((x) => x.id === categoryId)
+    return [...new Set((c?.sections || []).map((s) => s.section_label))]
+  }
+
   const handleAddPriority = async (typeId) => {
     if (!addPriorityCategoryId) return
     setAddingPriority(true)
     try {
-      await api.addSeatingPriority(loadedEventId, typeId, { seating_category_id: addPriorityCategoryId })
+      await api.addSeatingPriority(loadedEventId, typeId, {
+        seating_category_id: addPriorityCategoryId,
+        section_label: addPrioritySection || null,
+      })
       const updated = await api.listSeatingPriorities(loadedEventId, typeId)
       setPriorityLists({ ...priorityLists, [typeId]: updated })
       setAddPriorityCategoryId('')
+      setAddPrioritySection('')
       onToast('Added to priority list')
     } catch (err) {
       onToast(err.message, true)
@@ -365,7 +376,12 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                       padding: '4px 0',
                                     }}
                                   >
-                                    <span>{categoryName(p.seating_category_id)}</span>
+                                    <span>
+                                      {categoryName(p.seating_category_id)}
+                                      {p.section_label && (
+                                        <span style={{ color: 'var(--text-muted)' }}> · Section {p.section_label}</span>
+                                      )}
+                                    </span>
                                     <button
                                       className="btn btn-danger btn-sm"
                                       onClick={() => handleDeletePriority(t.id, p.id)}
@@ -384,15 +400,43 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               >
                                 <option value="">Choose a category to add…</option>
                                 {categories
-                                  .filter(
-                                    (c) => !(priorityLists[t.id] || []).some((p) => p.seating_category_id === c.id)
-                                  )
+                                  .filter((c) => {
+                                    const entries = priorityLists[t.id] || []
+                                    // a pool with sections can appear once per section
+                                    // (plus once pool-wide); a plain pool only once
+                                    if ((c.sections || []).length > 0) {
+                                      const used = entries.filter((p) => p.seating_category_id === c.id)
+                                      return used.length < new Set((c.sections || []).map((s) => s.section_label)).size + 1
+                                    }
+                                    return !entries.some((p) => p.seating_category_id === c.id)
+                                  })
                                   .map((c) => (
                                     <option key={c.id} value={c.id}>
                                       {c.name}
                                     </option>
                                   ))}
                               </select>
+                              {sectionLabelsOf(addPriorityCategoryId).length > 0 && (
+                                <select
+                                  style={selectStyle}
+                                  value={addPrioritySection}
+                                  onChange={(e) => setAddPrioritySection(e.target.value)}
+                                >
+                                  <option value="">Whole area</option>
+                                  {sectionLabelsOf(addPriorityCategoryId)
+                                    .filter(
+                                      (lbl) =>
+                                        !(priorityLists[t.id] || []).some(
+                                          (p) => p.seating_category_id === addPriorityCategoryId && p.section_label === lbl
+                                        )
+                                    )
+                                    .map((lbl) => (
+                                      <option key={lbl} value={lbl}>
+                                        Section {lbl}
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
                               <button
                                 className="btn btn-secondary btn-sm"
                                 disabled={addingPriority || !addPriorityCategoryId}
