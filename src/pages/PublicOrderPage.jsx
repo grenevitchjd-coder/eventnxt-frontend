@@ -146,6 +146,11 @@ export default function PublicOrderPage() {
                   <span className="mono" style={{ fontSize: 16, color: 'var(--text)' }}>
                     {t.code}
                   </span>
+                  {t.valid_date && (
+                    <span style={{ fontSize: 12.5, color: 'var(--text)', fontWeight: 700 }}>
+                      {new Date(t.valid_date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {t.ticket_type_name}
                     {t.status !== 'valid' ? ' — refunded' : ''}

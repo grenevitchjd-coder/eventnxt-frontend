@@ -102,11 +102,22 @@ export default function EventSettingsTab({ onToast, eventId }) {
   const [refundPolicy, setRefundPolicy] = useState('')
   const [savingPolicy, setSavingPolicy] = useState(false)
   const [uploadingMap, setUploadingMap] = useState(false)
+  const [dayDraft, setDayDraft] = useState(null) // {ticket_span, pricing_mode, seating_mode, first_day, last_day}
+  const [savingDays, setSavingDays] = useState(false)
 
   useEffect(() => {
     api
       .getEventSettings(eventId)
-      .then(setSettings)
+      .then((s) => {
+        setSettings(s)
+        setDayDraft({
+          ticket_span: s.ticket_span || 'single_day',
+          pricing_mode: s.pricing_mode || 'uniform',
+          seating_mode: s.seating_mode || 'uniform',
+          first_day: s.first_day || '',
+          last_day: s.last_day || '',
+        })
+      })
       .catch((e) => onToast(e.message, true))
     api
       .getEventProfile(eventId)
@@ -129,6 +140,26 @@ export default function EventSettingsTab({ onToast, eventId }) {
       onToast(err.message, true)
     } finally {
       setSavingField(null)
+    }
+  }
+
+  const saveDayDraft = async () => {
+    setSavingDays(true)
+    try {
+      const payload = {
+        ticket_span: dayDraft.ticket_span,
+        pricing_mode: dayDraft.pricing_mode,
+        seating_mode: dayDraft.seating_mode,
+      }
+      if (dayDraft.first_day) payload.first_day = dayDraft.first_day
+      if (dayDraft.last_day) payload.last_day = dayDraft.last_day
+      const updated = await api.updateEventSettings(eventId, payload)
+      setSettings(updated)
+      onToast('Event days saved')
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingDays(false)
     }
   }
 
@@ -208,6 +239,85 @@ export default function EventSettingsTab({ onToast, eventId }) {
         onChange={(v) => changeSetting('comp_delivery', v)}
         saving={savingField === 'comp_delivery'}
       />
+
+      <div className="panel">
+        <div className="panel-title">Event days &amp; ticket span</div>
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+          Multi-day events: declare how tickets work across days. One ticket for the whole event
+          still sends the buyer a dated code for <em>each</em> day; the door rejects codes shown on
+          the wrong day. Single day is exactly today&apos;s behavior.
+        </p>
+        {dayDraft && (
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div className="field" style={{ width: 210 }}>
+              <label htmlFor="set-span">Ticket span</label>
+              <select
+                id="set-span"
+                value={dayDraft.ticket_span}
+                onChange={(e) => setDayDraft({ ...dayDraft, ticket_span: e.target.value })}
+              >
+                <option value="single_day">Single day (default)</option>
+                <option value="multi_day">One ticket, whole event</option>
+                <option value="mixed">Mixed — days and passes</option>
+              </select>
+            </div>
+            {dayDraft.ticket_span !== 'single_day' && (
+              <>
+                <div className="field" style={{ width: 160 }}>
+                  <label htmlFor="set-first">First day</label>
+                  <input
+                    id="set-first"
+                    type="date"
+                    value={dayDraft.first_day}
+                    onChange={(e) => setDayDraft({ ...dayDraft, first_day: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ width: 160 }}>
+                  <label htmlFor="set-last">Last day</label>
+                  <input
+                    id="set-last"
+                    type="date"
+                    value={dayDraft.last_day}
+                    onChange={(e) => setDayDraft({ ...dayDraft, last_day: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ width: 200 }}>
+                  <label htmlFor="set-pricing">Pricing</label>
+                  <select
+                    id="set-pricing"
+                    value={dayDraft.pricing_mode}
+                    onChange={(e) => setDayDraft({ ...dayDraft, pricing_mode: e.target.value })}
+                  >
+                    <option value="uniform">Same every day</option>
+                    <option value="per_day">Unique per day</option>
+                  </select>
+                </div>
+                <div className="field" style={{ width: 200 }}>
+                  <label htmlFor="set-seatmode">Seating</label>
+                  <select
+                    id="set-seatmode"
+                    value={dayDraft.seating_mode}
+                    onChange={(e) => setDayDraft({ ...dayDraft, seating_mode: e.target.value })}
+                  >
+                    <option value="uniform">Same throughout</option>
+                    <option value="per_day">Unique per day</option>
+                  </select>
+                </div>
+              </>
+            )}
+            <button className="btn btn-secondary btn-sm" disabled={savingDays} onClick={saveDayDraft}>
+              {savingDays ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+        {dayDraft && dayDraft.ticket_span !== 'single_day' && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+            Pricing and seating choices shape the ticket composer (day-by-day setup arrives with the
+            next update); span and days take effect immediately — new whole-event purchases mint one
+            dated code per day.
+          </p>
+        )}
+      </div>
 
       <div className="panel">
         <div className="panel-title">Venue map</div>

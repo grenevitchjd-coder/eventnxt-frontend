@@ -22,9 +22,16 @@ import { api } from '../api'
 
 const RESULT_STYLES = {
   admitted: { bg: '#E1F5EE', border: '#0F6E56', label: 'ADMIT' },
+  wrong_day: { bg: '#FDEBD7', border: '#B4590A', label: 'WRONG DAY — DO NOT ADMIT' },
   already_checked_in: { bg: '#FBF3DC', border: '#8A6D1C', label: 'ALREADY CHECKED IN' },
   refunded: { bg: '#FAE4E4', border: '#A33', label: 'REFUNDED — DO NOT ADMIT' },
   not_found: { bg: '#FAE4E4', border: '#A33', label: 'NOT A TICKET FOR THIS EVENT' },
+}
+
+// The scanner's own date — venue-local in practice (door staff device).
+const localDay = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export default function ScanPage() {
@@ -52,7 +59,7 @@ export default function ScanPage() {
     if (!clean || busy) return
     setBusy(true)
     try {
-      const r = await api.checkInTicket(eventId, clean)
+      const r = await api.checkInTicket(eventId, clean, localDay())
       setResult(r)
       loadStats()
     } catch (err) {
@@ -165,6 +172,11 @@ export default function ScanPage() {
           <div style={{ fontSize: 13.5, marginTop: 2 }}>
             {[result.ticket_type_name, result.seat_label, result.party_note].filter(Boolean).join(' · ') || result.code}
           </div>
+          {result.result === 'wrong_day' && result.valid_date && (
+            <div style={{ fontSize: 13.5, marginTop: 4, fontWeight: 700 }}>
+              This ticket is for {new Date(result.valid_date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+            </div>
+          )}
           {result.result === 'already_checked_in' && result.checked_in_at && (
             <div style={{ fontSize: 13, marginTop: 4 }}>
               First scanned at {new Date(result.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

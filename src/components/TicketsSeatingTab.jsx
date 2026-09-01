@@ -76,6 +76,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [selectedSeats, setSelectedSeats] = useState([]) // seat ids
   const [reserveLabel, setReserveLabel] = useState('Press')
   const [savingSeats, setSavingSeats] = useState(false)
+  const [eventSettings, setEventSettings] = useState(null)
 
   // Comp-only areas
   const [compForm, setCompForm] = useState({ name: '', capacity: '' })
@@ -105,6 +106,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   // (key={eventId}) when the event changes, so loading once on mount is
   // all that's needed here.
   useEffect(() => {
+    api.getEventSettings(eventId).then(setEventSettings).catch(() => {})
     api
       .getEventSettings(eventId)
       .then(setSettings)
@@ -544,6 +546,19 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             ? 'Tickets for this event sell on your external platform — here you define the room itself, which powers the guest list, comps, and reconciliation. External sales come in via CSV import (Promos & referrals).'
             : 'This event is invite-only — no public sales. The areas here power the guest list, comps, and the reconciliation below.'}
       </p>
+      {eventSettings && eventSettings.ticket_span !== 'single_day' && (
+        <div
+          style={{
+            background: 'var(--surface-alt)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '8px 12px', fontSize: 12.5, marginBottom: 14,
+          }}
+        >
+          <strong>{eventSettings.ticket_span === 'multi_day' ? 'Whole-event tickets' : 'Mixed days & passes'}</strong>
+          {' · '}
+          {eventSettings.first_day} → {eventSettings.last_day} — whole-event types mint one dated code
+          per day. Change this in Event settings.
+        </div>
+      )}
 
       {selling && (
         <div className="panel">

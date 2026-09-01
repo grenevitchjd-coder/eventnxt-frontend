@@ -172,8 +172,11 @@ export const api = {
   denyTicketRequest: (eventId, requestId) =>
     request(`/events/${eventId}/guests/ticket-requests/${requestId}/deny`, { method: 'POST' }),
   // Door check-in
-  checkInTicket: (eventId, code) =>
-    request(`/events/${eventId}/check-in/${encodeURIComponent(code)}`, { method: 'POST' }),
+  checkInTicket: (eventId, code, day) =>
+    request(
+      `/events/${eventId}/check-in/${encodeURIComponent(code)}${day ? `?day=${encodeURIComponent(day)}` : ''}`,
+      { method: 'POST' }
+    ),
   checkInStats: (eventId) => request(`/events/${eventId}/check-in/stats`),
 
   // Event profile (public-facing content + shareable page)
