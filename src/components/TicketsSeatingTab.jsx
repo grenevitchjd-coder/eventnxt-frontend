@@ -79,6 +79,9 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [reserveLabel, setReserveLabel] = useState('Press')
   const [savingSeats, setSavingSeats] = useState(false)
   const [eventSettings, setEventSettings] = useState(null)
+  const [passOpenId, setPassOpenId] = useState(null)
+  const [passForm, setPassForm] = useState({ name: '', price: '', quantity: '', max_per_order: '4' })
+  const [creatingPass, setCreatingPass] = useState(false)
   const eventDays = (() => {
     if (!eventSettings || !eventSettings.first_day || !eventSettings.last_day) return []
     if (!['per_day', 'mixed'].includes(eventSettings.ticket_span)) return []
@@ -353,6 +356,44 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const poolFor = (t) => (categories || []).find((c) => c.id === t.seating_category_id) || null
 
   // ---------- Reserved seats (assigned pools) ----------
+
+  // A nightly type can grow an all-days pass when: mixed span, seated
+  // pool, and the same-named family covers 2+ days (the fan-out shape).
+  const passEligible = (t) => {
+    if (eventSettings?.ticket_span !== 'mixed' || !t.valid_date || t.is_pass) return false
+    const pool = poolFor(t)
+    if (!pool || pool.sales_grain !== 'seat') return false
+    const familyDays = new Set(
+      (ticketTypes || []).filter((x) => x.name === t.name && x.valid_date).map((x) => x.valid_date)
+    )
+    return familyDays.size >= 2
+  }
+
+  const openPassForm = (t) => {
+    setSectionsOpenId(null)
+    setSeatsOpenId(null)
+    setPassOpenId(t.id)
+    setPassForm({ name: `${t.name} — All Days`, price: '', quantity: '', max_per_order: '4' })
+  }
+
+  const submitPass = async (t) => {
+    setCreatingPass(true)
+    try {
+      const created = await api.createPassFromType(eventId, t.id, {
+        name: passForm.name.trim(),
+        price_cents: dollarsToCents(passForm.price || '0'),
+        quantity: parseInt(passForm.quantity, 10) || 1,
+        max_per_order: parseInt(passForm.max_per_order, 10) || 4,
+      })
+      onToast(`"${created.name}" created — one seat, every night, one price`)
+      setPassOpenId(null)
+      loadEventData()
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setCreatingPass(false)
+    }
+  }
 
   const openSeatsView = (t) => {
     const pool = poolFor(t)
@@ -941,7 +982,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                             )}
                             {!t.valid_date && eventSettings?.ticket_span === 'mixed' && (
                               <span className="pill pill-confirmed" style={{ marginLeft: 6, fontSize: 10.5 }}>
-                                all days
+                                {t.is_pass ? 'all-days pass' : 'all days'}
                               </span>
                             )}
                           </div>
@@ -987,6 +1028,14 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                               onClick={() => (seatsOpenId === t.id ? setSeatsOpenId(null) : openSeatsView(t))}
                             >
                               Seats
+                            </button>
+                          )}
+                          {passEligible(t) && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (passOpenId === t.id ? setPassOpenId(null) : openPassForm(t))}
+                            >
+                              All-days pass
                             </button>
                           )}
                           <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(t)}>
@@ -1092,6 +1141,45 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
                             Saving re-derives the pool capacity and keeps the ticket quantity in step.
                           </p>
+                        </td>
+                      </tr>
+                    )}
+                    {passOpenId === t.id && (
+                      <tr>
+                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
+                            All-days pass from &ldquo;{t.name}&rdquo;
+                          </div>
+                          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
+                            One product, one price, every night: the buyer picks a seat once and keeps
+                            that exact seat on all {new Set((ticketTypes || []).filter((x) => x.name === t.name && x.valid_date).map((x) => x.valid_date)).size} nights.
+                            It owns no inventory — availability is the seats themselves (free on every
+                            night), plus the cap below.
+                          </p>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                            <div className="field" style={{ width: 220 }}>
+                              <label>Pass name</label>
+                              <input value={passForm.name} onChange={(e) => setPassForm({ ...passForm, name: e.target.value })} />
+                            </div>
+                            <div className="field" style={{ width: 120 }}>
+                              <label>Price ($)</label>
+                              <input value={passForm.price} onChange={(e) => setPassForm({ ...passForm, price: e.target.value })} />
+                            </div>
+                            <div className="field" style={{ width: 110 }}>
+                              <label>Cap (qty)</label>
+                              <input value={passForm.quantity} onChange={(e) => setPassForm({ ...passForm, quantity: e.target.value })} />
+                            </div>
+                            <div className="field" style={{ width: 110 }}>
+                              <label>Max/order</label>
+                              <input value={passForm.max_per_order} onChange={(e) => setPassForm({ ...passForm, max_per_order: e.target.value })} />
+                            </div>
+                            <button className="btn btn-primary btn-sm" type="button" disabled={creatingPass || !passForm.quantity} onClick={() => submitPass(t)}>
+                              {creatingPass ? 'Creating…' : 'Create pass'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setPassOpenId(null)}>
+                              Cancel
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )}
