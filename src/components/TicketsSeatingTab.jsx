@@ -553,7 +553,13 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             padding: '8px 12px', fontSize: 12.5, marginBottom: 14,
           }}
         >
-          <strong>{eventSettings.ticket_span === 'multi_day' ? 'Whole-event tickets' : 'Mixed days & passes'}</strong>
+          <strong>
+            {eventSettings.ticket_span === 'multi_day'
+              ? 'Whole-event tickets'
+              : eventSettings.ticket_span === 'per_day'
+                ? 'Tickets sold per day'
+                : 'Mixed days & passes'}
+          </strong>
           {' · '}
           {eventSettings.first_day} → {eventSettings.last_day} — whole-event types mint one dated code
           per day. Change this in Event settings.
