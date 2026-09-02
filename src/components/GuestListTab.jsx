@@ -170,6 +170,12 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: guestForm.perks || null,
         comments: guestForm.comments || null,
         guest_mode: guestForm.guest_mode || null,
+        ticket_allotment: (() => {
+          const rows = Object.entries(guestForm.day_grants || {})
+            .filter(([, q]) => q !== '' && Number(q) > 0)
+            .map(([date, q]) => ({ date, quantity: Number(q) }))
+          return rows.length ? rows : undefined
+        })(),
       })
       onToast(`${guestForm.name} added`)
       setGuestForm({
@@ -184,6 +190,7 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: '',
         comments: '',
         guest_mode: '',
+        day_grants: {},
       })
       loadEventData(loadedEventId)
     } catch (err) {
@@ -344,8 +351,13 @@ export default function GuestListTab({ onToast, eventId }) {
         email: guest.email,
         guest_type_id: guest.guest_type_id,
         seating_category_id: guest.seating_category_id || null,
+        section_label: guest.section_label || null,
+        visit_date: guest.visit_date || null,
         allocation_status: guest.allocation_status,
         party_size: guest.party_size || 1,
+        perks: guest.perks || null,
+        comments: guest.comments || null,
+        guest_mode: guest.guest_mode ?? null,
         ticket_allotment: allotmentDraftRows,
       })
       onToast('Ticket allotment saved')
@@ -759,6 +771,34 @@ export default function GuestListTab({ onToast, eventId }) {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+              {guestEventDays.length > 0 && (
+                <div className="field" style={{ minWidth: 240 }}>
+                  <label title="Invite mode: tickets minted per day. Distribute mode: the budget they hand out.">
+                    Per-day tickets
+                  </label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {guestEventDays.map((d) => (
+                      <div key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{fmtGuestDay(d)}</span>
+                        <input
+                          id={`ga-${d}`}
+                          type="number"
+                          min={0}
+                          placeholder="—"
+                          style={{ width: 54, textAlign: 'center' }}
+                          value={guestForm.day_grants?.[d] ?? ''}
+                          onChange={(e) =>
+                            setGuestForm({
+                              ...guestForm,
+                              day_grants: { ...(guestForm.day_grants || {}), [d]: e.target.value },
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {guestEventDays.length > 0 && (
@@ -1517,11 +1557,25 @@ export default function GuestListTab({ onToast, eventId }) {
                             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                               <div className="field" style={{ width: 170 }}>
                                 <label>Date</label>
-                                <input
-                                  type="date"
-                                  value={newAllotmentDay.date}
-                                  onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
-                                />
+                                {guestEventDays.length > 0 ? (
+                                  <select
+                                    value={newAllotmentDay.date}
+                                    onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
+                                  >
+                                    <option value="">Choose a day…</option>
+                                    {guestEventDays.map((d) => (
+                                      <option key={d} value={d}>
+                                        {fmtGuestDay(d)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="date"
+                                    value={newAllotmentDay.date}
+                                    onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
+                                  />
+                                )}
                               </div>
                               <div className="field" style={{ width: 110 }}>
                                 <label>Tickets</label>
