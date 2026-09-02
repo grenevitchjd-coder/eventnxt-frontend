@@ -71,6 +71,7 @@ export default function GuestListTab({ onToast, eventId }) {
     guest_type_id: '',
     seating_category_id: '',
     section_label: '',
+    visit_date: '',
     allocation_status: 'confirmed',
     party_size: 1,
     perks: '',
@@ -96,6 +97,20 @@ export default function GuestListTab({ onToast, eventId }) {
   const [guestSeatMap, setGuestSeatMap] = useState(null) // null = loading
   const [guestSeatSel, setGuestSeatSel] = useState([])
   const [savingGuestSeats, setSavingGuestSeats] = useState(false)
+  const [guestEventSettings, setGuestEventSettings] = useState(null)
+  const guestEventDays = (() => {
+    const s = guestEventSettings
+    if (!s || !s.first_day || !s.last_day || !['per_day', 'mixed', 'multi_day'].includes(s.ticket_span)) return []
+    const out = []
+    const d = new Date(s.first_day + 'T12:00:00')
+    const last = new Date(s.last_day + 'T12:00:00')
+    while (d <= last && out.length < 60) {
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+      d.setDate(d.getDate() + 1)
+    }
+    return out
+  })()
+  const fmtGuestDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
 
   // ---- CSV/Excel import ----
   const fileInputRef = useRef(null)
@@ -112,6 +127,7 @@ export default function GuestListTab({ onToast, eventId }) {
   const [filterSent, setFilterSent] = useState('')
 
   const loadEventData = (id) => {
+    api.getEventSettings(id).then(setGuestEventSettings).catch(() => {})
     setCategories(null)
     setGuests(null)
     api.listTicketRequests(id).then(setTicketRequests).catch(() => {}) // absent pre-0021 backend: fine
@@ -148,6 +164,7 @@ export default function GuestListTab({ onToast, eventId }) {
         guest_type_id: guestForm.guest_type_id,
         seating_category_id: guestForm.seating_category_id || null,
         section_label: (guestForm.seating_category_id && guestForm.section_label) || null,
+        visit_date: guestForm.visit_date || null,
         allocation_status: guestForm.allocation_status,
         party_size: Number(guestForm.party_size) || 1,
         perks: guestForm.perks || null,
@@ -161,6 +178,7 @@ export default function GuestListTab({ onToast, eventId }) {
         guest_type_id: '',
         seating_category_id: '',
         section_label: '',
+        visit_date: '',
         allocation_status: 'confirmed',
         party_size: 1,
         perks: '',
@@ -183,6 +201,7 @@ export default function GuestListTab({ onToast, eventId }) {
       guest_type_id: guest.guest_type_id,
       seating_category_id: guest.seating_category_id || '',
       section_label: guest.section_label || '',
+      visit_date: guest.visit_date || '',
       allocation_status: guest.allocation_status,
       party_size: guest.party_size || 1,
       perks: guest.perks || '',
@@ -200,6 +219,7 @@ export default function GuestListTab({ onToast, eventId }) {
         guest_type_id: guestEditForm.guest_type_id,
         seating_category_id: guestEditForm.seating_category_id || null,
         section_label: (guestEditForm.seating_category_id && guestEditForm.section_label) || null,
+        visit_date: guestEditForm.visit_date || null,
         allocation_status: guestEditForm.allocation_status,
         party_size: Number(guestEditForm.party_size) || 1,
         perks: guestEditForm.perks || null,
@@ -741,6 +761,23 @@ export default function GuestListTab({ onToast, eventId }) {
                   </select>
                 </div>
               )}
+              {guestEventDays.length > 0 && (
+                <div className="field">
+                  <label htmlFor="g-day">Day</label>
+                  <select
+                    id="g-day"
+                    value={guestForm.visit_date}
+                    onChange={(e) => setGuestForm({ ...guestForm, visit_date: e.target.value })}
+                  >
+                    <option value="">Whole event</option>
+                    {guestEventDays.map((d) => (
+                      <option key={d} value={d}>
+                        {fmtGuestDay(d)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="g-status">Status</label>
                 <select
@@ -1163,6 +1200,21 @@ export default function GuestListTab({ onToast, eventId }) {
                               {sectionLabelsOf(guestEditForm.seating_category_id).map((lbl) => (
                                 <option key={lbl} value={lbl}>
                                   Section {lbl}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {guestEventDays.length > 0 && (
+                            <select
+                              style={{ ...selectStyle, marginTop: 4 }}
+                              title="Day"
+                              value={guestEditForm.visit_date || ''}
+                              onChange={(e) => setGuestEditForm({ ...guestEditForm, visit_date: e.target.value })}
+                            >
+                              <option value="">Whole event</option>
+                              {guestEventDays.map((d) => (
+                                <option key={d} value={d}>
+                                  {fmtGuestDay(d)}
                                 </option>
                               ))}
                             </select>
