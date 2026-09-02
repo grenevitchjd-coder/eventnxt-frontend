@@ -170,6 +170,7 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: guestForm.perks || null,
         comments: guestForm.comments || null,
         guest_mode: guestForm.guest_mode || null,
+        hold_timing: guestForm.hold_timing || 'now',
         ticket_allotment: (() => {
           const rows = Object.entries(guestForm.day_grants || {})
             .filter(([, q]) => q !== '' && Number(q) > 0)
@@ -190,6 +191,7 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: '',
         comments: '',
         guest_mode: '',
+        hold_timing: 'now',
         day_grants: {},
       })
       loadEventData(loadedEventId)
@@ -214,6 +216,7 @@ export default function GuestListTab({ onToast, eventId }) {
       perks: guest.perks || '',
       comments: guest.comments || '',
       guest_mode: guest.guest_mode || '',
+      hold_timing: guest.hold_timing || 'now',
     })
   }
 
@@ -232,6 +235,7 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: guestEditForm.perks || null,
         comments: guestEditForm.comments || null,
         guest_mode: guestEditForm.guest_mode ?? null,
+        hold_timing: guestEditForm.hold_timing || 'now',
       })
       onToast('Saved')
       setEditingGuestId(null)
@@ -358,6 +362,7 @@ export default function GuestListTab({ onToast, eventId }) {
         perks: guest.perks || null,
         comments: guest.comments || null,
         guest_mode: guest.guest_mode ?? null,
+        hold_timing: guest.hold_timing || 'now',
         ticket_allotment: allotmentDraftRows,
       })
       onToast('Ticket allotment saved')
@@ -841,6 +846,18 @@ export default function GuestListTab({ onToast, eventId }) {
                   <option value="invite">Invite — RSVP for themselves</option>
                   <option value="distribute">Distribute — hands out an allotment</option>
                   <option value="select">Select — picks their own day</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="g-hold">Hold seats</label>
+                <select
+                  id="g-hold"
+                  value={guestForm.hold_timing}
+                  onChange={(e) => setGuestForm({ ...guestForm, hold_timing: e.target.value })}
+                >
+                  <option value="now">Now (protect from buyers)</option>
+                  <option value="on_confirm">When they confirm</option>
+                  <option value="later">Later — no hold yet</option>
                 </select>
               </div>
               <div className="field">
