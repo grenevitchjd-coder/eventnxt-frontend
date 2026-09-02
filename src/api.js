@@ -128,6 +128,11 @@ export const api = {
     }),
   deleteSeatingCategory: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
+  syncGuestTickets: (eventId, guestId, payload) =>
+    request(`/events/${eventId}/guests/${guestId}/sync-tickets`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    }),
   createPassFromType: (eventId, ticketTypeId, payload) =>
     request(`/events/${eventId}/ticket-types/${ticketTypeId}/pass`, {
       method: 'POST',

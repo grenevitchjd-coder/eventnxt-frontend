@@ -171,6 +171,7 @@ export default function GuestListTab({ onToast, eventId }) {
         comments: guestForm.comments || null,
         guest_mode: guestForm.guest_mode || null,
         hold_timing: guestForm.hold_timing || 'now',
+        cohort_together: guestForm.cohort_together !== false,
         ticket_allotment: (() => {
           const rows = Object.entries(guestForm.day_grants || {})
             .filter(([, q]) => q !== '' && Number(q) > 0)
@@ -192,6 +193,7 @@ export default function GuestListTab({ onToast, eventId }) {
         comments: '',
         guest_mode: '',
         hold_timing: 'now',
+        cohort_together: true,
         day_grants: {},
       })
       loadEventData(loadedEventId)
@@ -199,6 +201,21 @@ export default function GuestListTab({ onToast, eventId }) {
       onToast(err.message, true)
     } finally {
       setCreatingGuest(false)
+    }
+  }
+
+  const syncAndResend = async (guest) => {
+    const note = window.prompt(
+      'Update & resend: their codes will be re-trued to their current days/quantities/seats and emailed.\n\nOptional note to highlight in the email (e.g. "You\u2019ve been upgraded to Row 1!"):',
+      ''
+    )
+    if (note === null) return
+    try {
+      await api.syncGuestTickets(loadedEventId, guest.id, { note: note.trim() || null, resend: true })
+      onToast(`${guest.name}'s tickets re-trued and resent`)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
     }
   }
 
@@ -848,6 +865,21 @@ export default function GuestListTab({ onToast, eventId }) {
                   <option value="select">Select — picks their own day</option>
                 </select>
               </div>
+              {guestForm.guest_mode === 'distribute' && (
+                <div className="field">
+                  <label htmlFor="g-cohort" title="Recipients from this allocation on the same day: one section side by side, or spread individually">
+                    Seat recipients
+                  </label>
+                  <select
+                    id="g-cohort"
+                    value={guestForm.cohort_together === false ? 'spread' : 'together'}
+                    onChange={(e) => setGuestForm({ ...guestForm, cohort_together: e.target.value === 'together' })}
+                  >
+                    <option value="together">Together (same section)</option>
+                    <option value="spread">Spread individually</option>
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="g-hold">Hold seats</label>
                 <select
@@ -1438,6 +1470,15 @@ export default function GuestListTab({ onToast, eventId }) {
                               onClick={() => (seatsGuestId === g.id ? setSeatsGuestId(null) : openGuestSeats(g))}
                             >
                               Seats
+                            </button>
+                          )}
+                          {g.allocation_status === 'confirmed' && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              title="Re-true codes to current days/quantities/seats and resend, with an optional note"
+                              onClick={() => syncAndResend(g)}
+                            >
+                              Update & resend
                             </button>
                           )}
                           <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
