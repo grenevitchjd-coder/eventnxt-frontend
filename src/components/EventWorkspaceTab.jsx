@@ -168,18 +168,25 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     return [...new Set((c?.sections || []).map((s) => s.section_label))]
   }
 
+  const [addPriorityMulti, setAddPriorityMulti] = useState([]) // multiple allowed sections
+  const [addPriorityPlacement, setAddPriorityPlacement] = useState('together')
+
   const handleAddPriority = async (typeId) => {
     if (!addPriorityCategoryId) return
     setAddingPriority(true)
     try {
       await api.addSeatingPriority(loadedEventId, typeId, {
         seating_category_id: addPriorityCategoryId,
-        section_label: addPrioritySection || null,
+        section_label: addPriorityMulti.length ? null : addPrioritySection || null,
+        allowed_sections: addPriorityMulti.length ? addPriorityMulti : null,
+        placement: addPriorityPlacement,
       })
       const updated = await api.listSeatingPriorities(loadedEventId, typeId)
       setPriorityLists({ ...priorityLists, [typeId]: updated })
       setAddPriorityCategoryId('')
       setAddPrioritySection('')
+      setAddPriorityMulti([])
+      setAddPriorityPlacement('together')
       onToast('Added to priority list')
     } catch (err) {
       onToast(err.message, true)
@@ -378,8 +385,14 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                   >
                                     <span>
                                       {categoryName(p.seating_category_id)}
-                                      {p.section_label && (
+                                      {p.section_label && !p.allowed_sections && (
                                         <span style={{ color: 'var(--text-muted)' }}> · Section {p.section_label}</span>
+                                      )}
+                                      {p.allowed_sections && (
+                                        <span style={{ color: 'var(--text-muted)' }}>
+                                          {' '}· Sections {p.allowed_sections}
+                                          {p.placement === 'spread' ? ' · spread' : ' · in order'}
+                                        </span>
                                       )}
                                     </span>
                                     <button
@@ -416,7 +429,39 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                     </option>
                                   ))}
                               </select>
-                              {sectionLabelsOf(addPriorityCategoryId).length > 0 && (
+                              {sectionLabelsOf(addPriorityCategoryId).length > 1 && (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>Allowed:</span>
+                                  {sectionLabelsOf(addPriorityCategoryId).map((lbl) => (
+                                    <label key={lbl} style={{ display: 'flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={addPriorityMulti.includes(lbl)}
+                                        onChange={(e) =>
+                                          setAddPriorityMulti(
+                                            e.target.checked
+                                              ? [...addPriorityMulti, lbl]
+                                              : addPriorityMulti.filter((x) => x !== lbl)
+                                          )
+                                        }
+                                      />
+                                      {lbl}
+                                    </label>
+                                  ))}
+                                  {addPriorityMulti.length > 1 && (
+                                    <select
+                                      style={selectStyle}
+                                      value={addPriorityPlacement}
+                                      onChange={(e) => setAddPriorityPlacement(e.target.value)}
+                                      title="How guests fill the allowed sections"
+                                    >
+                                      <option value="together">Fill in order (together)</option>
+                                      <option value="spread">Spread evenly</option>
+                                    </select>
+                                  )}
+                                </div>
+                              )}
+                              {sectionLabelsOf(addPriorityCategoryId).length > 0 && addPriorityMulti.length === 0 && (
                                 <select
                                   style={selectStyle}
                                   value={addPrioritySection}
