@@ -484,7 +484,27 @@ export default function PublicRSVPPage() {
   }
 
   // ---------- Allotment holder — distribute tickets to others, per day ----------
+  const draftByDay = {}
+  for (const r of recipients) {
+    if (r.visit_date) draftByDay[r.visit_date] = (draftByDay[r.visit_date] || 0) + (Number(r.party_size) || 0)
+  }
+  const liveRemaining = (d) => Math.max((d.remaining || 0) - (draftByDay[d.date] || 0), 0)
   const availableDays = (info.day_allotments || []).filter((d) => d.remaining > 0)
+
+  const removeRecipient = async (childId) => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res = await fetch(`${API_URL}/public/rsvp/${token}/recipients/${childId}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Could not remove them')
+      setInfo(data)
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="public-event-page">
@@ -513,7 +533,12 @@ export default function PublicRSVPPage() {
               {(info.day_allotments || []).map((d) => (
                 <tr key={d.date}>
                   <td>{formatDate(d.date)}</td>
-                  <td className="mono">{d.remaining}</td>
+                  <td className="mono">
+                    {liveRemaining(d)}
+                    {draftByDay[d.date] > 0 && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> ({draftByDay[d.date]} below)</span>
+                    )}
+                  </td>
                   <td className="mono">{d.total}</td>
                 </tr>
               ))}
@@ -531,16 +556,47 @@ export default function PublicRSVPPage() {
                   <th>Date</th>
                   <th>Tickets</th>
                   <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {info.distributed_recipients.map((r, i) => (
-                  <tr key={i}>
+                  <tr key={r.id || i}>
                     <td>{r.name}</td>
                     <td>{r.visit_date ? formatDate(r.visit_date) : '—'}</td>
                     <td className="mono">{r.party_size}</td>
                     <td>
-                      <span className={`pill pill-${r.allocation_status}`}>{r.allocation_status}</span>
+                      <span className={`pill pill-${r.allocation_status}`}>
+                        {r.rsvp_confirmed === 'yes'
+                          ? 'confirmed'
+                          : r.rsvp_confirmed === 'no'
+                            ? 'declined'
+                            : 'no answer yet'}
+                      </span>
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {r.rsvp_link && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          title="Copy their confirmation link to forward yourself"
+                          onClick={() => navigator.clipboard?.writeText(r.rsvp_link)}
+                        >
+                          Copy link
+                        </button>
+                      )}
+                      {r.id && r.allocation_status !== 'confirmed' && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginLeft: 6 }}
+                          disabled={submitting}
+                          title="Take these tickets back — frees them for someone else"
+                          onClick={() => removeRecipient(r.id)}
+                        >
+                          Remove
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
