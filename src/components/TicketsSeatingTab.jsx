@@ -82,6 +82,10 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [passOpenId, setPassOpenId] = useState(null)
   const [passForm, setPassForm] = useState({ name: '', price: '', quantity: '', max_per_order: '4' })
   const [creatingPass, setCreatingPass] = useState(false)
+  // Convert-standalone-to-pass expander
+  const [convertOpenId, setConvertOpenId] = useState(null)
+  const [convertFamilyKey, setConvertFamilyKey] = useState('')
+  const [converting, setConverting] = useState(false)
   const eventDays = (() => {
     if (!eventSettings || !eventSettings.first_day || !eventSettings.last_day) return []
     if (!['per_day', 'mixed'].includes(eventSettings.ticket_span)) return []
@@ -223,6 +227,51 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       onToast('Give this ticket type a name.', true)
       return
     }
+    // Duplicate-inventory guard: an "All days" type whose row/sections
+    // already sell per night should almost always be a PASS on that
+    // nightly inventory, not a second copy of the room. Offer the pass;
+    // Cancel keeps today's behavior (independent standalone seats).
+    const wantsAllDays = eventDays.length > 0 && !composer.valid_date && eventSettings?.ticket_span === 'mixed'
+    if (wantsAllDays && composer.basis !== 'area') {
+      const typedSig = JSON.stringify({
+        row: normName(composer.basis === 'row' ? composer.row_label : ''),
+        secs: parsedSections.map(normName).sort(),
+      })
+      const match = seatedFamilies().find(
+        (f) =>
+          JSON.stringify({
+            row: normName(f.pool.row_label || ''),
+            secs: (f.pool.sections || []).map((s) => normName(s.section_label)).sort(),
+          }) === typedSig
+      )
+      if (match) {
+        const asPass = window.confirm(
+          `"${match.name}" already sells these exact sections night by night.\n\n` +
+            `OK — create "${ttName}" as an ALL-DAYS PASS that shares those physical seats ` +
+            `(buyer keeps the same seat every night; availability comes from the nights). Recommended.\n\n` +
+            `Cancel — create it as a separate, independent set of seats (can double-book the real room).`
+        )
+        if (asPass) {
+          setCreating(true)
+          try {
+            const created = await api.createPassFromType(eventId, match.template.id, {
+              name: ttName,
+              price_cents: dollarsToCents(composer.price || '0'),
+              quantity: composerUnits(),
+              max_per_order: parseInt(composer.max_per_order, 10) || 10,
+            })
+            onToast(`"${created.name}" created as an all-days pass — one seat, every night, shared with "${match.name}"`)
+            setComposer(EMPTY_COMPOSER)
+            loadEventData()
+          } catch (err) {
+            onToast(err.message, true)
+          } finally {
+            setCreating(false)
+          }
+          return
+        }
+      }
+    }
     setCreating(true)
     try {
       // 1. The seating pool behind this ticket type
@@ -259,7 +308,11 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       })
       if (chosenDay && composer.every_day && eventDays.length > 1) {
         const clones = await api.fanOutTicketType(eventId, created.id)
-        if (clones.length) onToast(`Cloned to ${clones.length} more day${clones.length === 1 ? '' : 's'} — same setup, independent inventory`)
+        if (clones.length)
+          onToast(
+            `Created for ${clones.length + 1} days — independent copies.` +
+              (eventSettings?.pricing_mode === 'per_day' ? ' Pricing is unique per day: edit each day\'s row below to set its price.' : '')
+          )
       }
       onToast(
         composerAdmits() > 1
@@ -357,6 +410,27 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   // ---------- Reserved seats (assigned pools) ----------
 
+  // The same normalization the backend uses for family matching: a
+  // trailing space or case difference can't split a day-family.
+  const normName = (s) => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+
+  // Dated, assigned-seat families (the fan-out shape a pass can ride
+  // on): grouped by normalized name, 2+ distinct days, every night's
+  // pool seat-grain. Each carries a template night + its structure for
+  // the composer's duplicate-inventory check.
+  const seatedFamilies = () => {
+    const groups = {}
+    ;(ticketTypes || []).forEach((t) => {
+      if (!t.valid_date || t.is_pass) return
+      const pool = poolFor(t)
+      if (!pool || pool.sales_grain !== 'seat') return
+      const key = normName(t.name)
+      if (!groups[key]) groups[key] = { key, name: t.name, template: t, days: new Set(), pool }
+      groups[key].days.add(t.valid_date)
+    })
+    return Object.values(groups).filter((g) => g.days.size >= 2)
+  }
+
   // A nightly type can grow an all-days pass when: mixed span, seated
   // pool, and the same-named family covers 2+ days (the fan-out shape).
   const passEligible = (t) => {
@@ -364,9 +438,57 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     const pool = poolFor(t)
     if (!pool || pool.sales_grain !== 'seat') return false
     const familyDays = new Set(
-      (ticketTypes || []).filter((x) => x.name === t.name && x.valid_date).map((x) => x.valid_date)
+      (ticketTypes || []).filter((x) => normName(x.name) === normName(t.name) && x.valid_date).map((x) => x.valid_date)
     )
     return familyDays.size >= 2
+  }
+
+  // ---------- Convert a standalone all-days type into a pass ----------
+
+  // The retro-fit for "the package was made first": an undated,
+  // non-pass type in mixed span can be rewired onto a nightly seated
+  // family — its own duplicate seats are discarded and it starts
+  // consuming the real nightly inventory.
+  const convertEligible = (t) =>
+    eventSettings?.ticket_span === 'mixed' && !t.valid_date && !t.is_pass && seatedFamilies().length > 0
+
+  const openConvertForm = (t) => {
+    setSectionsOpenId(null)
+    setSeatsOpenId(null)
+    setPassOpenId(null)
+    const fams = seatedFamilies()
+    const pool = poolFor(t)
+    // Preselect the family whose structure matches this type's own
+    // sections (same normalized row + section labels), when one does.
+    const structMatch = pool ? fams.find((f) => structuresMatch(pool, f.pool)) : null
+    setConvertOpenId(t.id)
+    setConvertFamilyKey((structMatch || fams[0]).key)
+  }
+
+  const structuresMatch = (poolA, poolB) => {
+    if (!poolA || !poolB) return false
+    const sig = (p) =>
+      JSON.stringify({
+        row: normName(p.row_label || ''),
+        secs: (p.sections || []).map((s) => normName(s.section_label)).sort(),
+      })
+    return (poolA.sections || []).length > 0 && sig(poolA) === sig(poolB)
+  }
+
+  const submitConvert = async (t) => {
+    const fam = seatedFamilies().find((f) => f.key === convertFamilyKey)
+    if (!fam) return
+    setConverting(true)
+    try {
+      const conv = await api.convertTypeToPass(eventId, t.id, fam.template.id)
+      onToast(`"${conv.name}" now shares "${fam.name}"'s seats — its own duplicate seats were removed`)
+      setConvertOpenId(null)
+      loadEventData()
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setConverting(false)
+    }
   }
 
   const openPassForm = (t) => {
@@ -681,7 +803,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                         checked={composer.every_day}
                         onChange={(e) => setComposer({ ...composer, every_day: e.target.checked })}
                       />
-                      Create for every day (same setup, independent inventory per day)
+                      <strong>Create for every day</strong>&nbsp;— a separate copy per day (independent price, capacity &amp; seats; edit each day below after)
                     </label>
                   )}
                 </div>
@@ -888,6 +1010,32 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         </div>
       )}
 
+      {selling && eventDays.length > 1 && ['per_day', 'mixed'].includes(eventSettings?.ticket_span) && (
+        <div
+          style={{
+            background: 'var(--surface-alt)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '10px 14px', fontSize: 12.5, margin: '14px 0', lineHeight: 1.55,
+          }}
+        >
+          <strong>Each day below is its own copy.</strong> &ldquo;Create for every day&rdquo; makes an
+          independent version per day — its own price, capacity, sections, and seats.
+          {eventSettings?.pricing_mode === 'per_day' && (
+            <> Your pricing is set to <strong>unique per day</strong>: after creating, hit Edit on each
+            day&apos;s row here to set that day&apos;s price.</>
+          )}
+          {eventSettings?.seating_mode === 'per_day' && (
+            <> Seating is <strong>unique per day</strong> too — adjust any day&apos;s capacity or sections
+            from its own row.</>
+          )}
+          {eventSettings?.pricing_mode !== 'per_day' && eventSettings?.seating_mode !== 'per_day' && (
+            <> Edit any day&apos;s row to change just that day.</>
+          )}
+          {' '}For assigned rows, each day&apos;s <strong>Seats</strong> button reserves specific seats
+          (press, VIP, sponsor holds) — reservations are per day and aren&apos;t copied, so set them on
+          each day you need them.
+        </div>
+      )}
+
       {selling && (
         <table className="data-table" style={{ marginBottom: 28 }}>
           <thead>
@@ -1038,6 +1186,14 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                               All-days pass
                             </button>
                           )}
+                          {convertEligible(t) && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (convertOpenId === t.id ? setConvertOpenId(null) : openConvertForm(t))}
+                            >
+                              Use nightly seats
+                            </button>
+                          )}
                           <button className="btn btn-secondary btn-sm" onClick={() => toggleActive(t)}>
                             {t.is_active ? 'Deactivate' : 'Activate'}
                           </button>
@@ -1152,7 +1308,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           </div>
                           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
                             One product, one price, every night: the buyer picks a seat once and keeps
-                            that exact seat on all {new Set((ticketTypes || []).filter((x) => x.name === t.name && x.valid_date).map((x) => x.valid_date)).size} nights.
+                            that exact seat on all {new Set((ticketTypes || []).filter((x) => normName(x.name) === normName(t.name) && x.valid_date).map((x) => x.valid_date)).size} nights.
                             It owns no inventory — availability is the seats themselves (free on every
                             night), plus the cap below.
                           </p>
@@ -1177,6 +1333,41 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                               {creatingPass ? 'Creating…' : 'Create pass'}
                             </button>
                             <button className="btn btn-secondary btn-sm" type="button" onClick={() => setPassOpenId(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {convertOpenId === t.id && (
+                      <tr>
+                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
+                            Use the nightly seats for &ldquo;{t.name}&rdquo;
+                          </div>
+                          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
+                            Right now this all-days type has its <strong>own separate seats</strong> — a second
+                            copy of the room that can double-book the real one. Converting makes it an
+                            all-days pass on the nightly tickets below: same physical seat every night,
+                            availability shared with each night&apos;s sales, and its own duplicate seats are
+                            removed. Name, price, and cap stay as they are. Only possible while nothing has
+                            been sold or held on it.
+                          </p>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                            <div className="field" style={{ width: 280 }}>
+                              <label>Share seats with (nightly tickets)</label>
+                              <select value={convertFamilyKey} onChange={(e) => setConvertFamilyKey(e.target.value)}>
+                                {seatedFamilies().map((f) => (
+                                  <option key={f.key} value={f.key}>
+                                    {f.name} — {f.days.size} nights
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <button className="btn btn-primary btn-sm" type="button" disabled={converting} onClick={() => submitConvert(t)}>
+                              {converting ? 'Converting…' : 'Convert to pass'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setConvertOpenId(null)}>
                               Cancel
                             </button>
                           </div>

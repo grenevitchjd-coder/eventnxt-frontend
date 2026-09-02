@@ -1,3 +1,4 @@
+// eventnxt-frontend: src/api.js
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
 const EVENTS360_FRONTEND_URL = import.meta.env.VITE_EVENTS360_FRONTEND_URL || 'http://localhost:5173'
 const TOKEN_KEY = 'eventnxt_token'
@@ -132,6 +133,11 @@ export const api = {
     request(`/events/${eventId}/guests/${guestId}/sync-tickets`, {
       method: 'POST',
       body: JSON.stringify(payload || {}),
+    }),
+  convertTypeToPass: (eventId, ticketTypeId, templateTypeId) =>
+    request(`/events/${eventId}/ticket-types/${ticketTypeId}/convert-to-pass`, {
+      method: 'POST',
+      body: JSON.stringify({ template_type_id: templateTypeId }),
     }),
   createPassFromType: (eventId, ticketTypeId, payload) =>
     request(`/events/${eventId}/ticket-types/${ticketTypeId}/pass`, {
