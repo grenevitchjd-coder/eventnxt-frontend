@@ -20,8 +20,9 @@ export default function PublicRSVPPage() {
   const [submitError, setSubmitError] = useState(null)
   const [recipients, setRecipients] = useState([emptyRecipient()])
   const [selectedDay, setSelectedDay] = useState('')
-  const [requestForm, setRequestForm] = useState({ quantity: 1, note: '' })
+  const [requestForm, setRequestForm] = useState({ quantity: 1, note: '', date: '' })
   const [requestOpen, setRequestOpen] = useState(false)
+  const [dayQty, setDayQty] = useState({}) // {date: n} — the acceptance grid
 
   const load = () => {
     fetch(`${API_URL}/public/rsvp/${token}`)
@@ -35,6 +36,19 @@ export default function PublicRSVPPage() {
 
   useEffect(load, [token])
 
+  useEffect(() => {
+    if (info && info.day_grants && Object.keys(dayQty).length === 0) {
+      const seed = {}
+      for (const g of info.day_grants) seed[g.date] = info.effective_mode === 'select' ? 0 : g.quantity
+      setDayQty(seed)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [info])
+
+  const gridActive = Boolean(info?.day_grants?.length)
+  const gridTotal = Object.values(dayQty).reduce((a, b) => a + (Number(b) || 0), 0)
+  const selectBudget = info?.effective_mode === 'select' ? info?.party_size || 1 : null
+
   const handleRespond = async (attending) => {
     setSubmitting(true)
     setSubmitError(null)
@@ -43,9 +57,11 @@ export default function PublicRSVPPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          attending && info?.effective_mode === 'select' && selectedDay
-            ? { attending, visit_date: selectedDay }
-            : { attending }
+          attending && gridActive
+            ? { attending, day_quantities: Object.fromEntries(Object.entries(dayQty).map(([d, q]) => [d, Number(q) || 0])) }
+            : attending && info?.effective_mode === 'select' && selectedDay
+              ? { attending, visit_date: selectedDay }
+              : { attending }
         ),
       })
       const data = await res.json()
@@ -66,7 +82,11 @@ export default function PublicRSVPPage() {
       const res = await fetch(`${API_URL}/public/rsvp/${token}/request-tickets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: Number(requestForm.quantity) || 1, note: requestForm.note || null }),
+        body: JSON.stringify({
+          quantity: Number(requestForm.quantity) || 1,
+          note: requestForm.note || null,
+          date: requestForm.date || null,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Something went wrong')
@@ -277,7 +297,55 @@ export default function PublicRSVPPage() {
               <p style={{ margin: 0 }}>You've let us know you can't make it.</p>
             </div>
           )}
-          {info.allocation_status === 'pending' && !info.needs_seating && info.effective_mode === 'select' && (info.available_days || []).length > 0 && (
+          {info.allocation_status === 'pending' && !info.needs_seating && gridActive && (
+            <div className="panel" style={{ textAlign: 'left', marginBottom: 16 }}>
+              <p style={{ marginTop: 0, marginBottom: 4, fontWeight: 600 }}>
+                {info.effective_mode === 'select'
+                  ? `You have ${selectBudget} ticket${selectBudget === 1 ? '' : 's'} — place them on the days you want`
+                  : 'Your tickets, day by day'}
+              </p>
+              <p style={{ marginTop: 0, marginBottom: 10, fontSize: 13, color: 'var(--text-muted)' }}>
+                {info.effective_mode === 'select'
+                  ? 'Any combination works, up to your total.'
+                  : 'Take them all, or turn any day down — need extras? Ask below.'}
+              </p>
+              {(info.day_grants || []).map((g) => (
+                <div key={g.date} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
+                  <span style={{ flex: 1 }}>{formatDate(g.date)}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={g.quantity}
+                    style={{ width: 64, textAlign: 'center' }}
+                    aria-label={`Tickets for ${g.date}`}
+                    value={dayQty[g.date] ?? 0}
+                    onChange={(e) => setDayQty({ ...dayQty, [g.date]: e.target.value })}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 46 }}>of {g.quantity}</span>
+                </div>
+              ))}
+              {info.effective_mode === 'select' && (
+                <p style={{ margin: '8px 0 0', fontSize: 13, fontWeight: gridTotal > selectBudget ? 700 : 400, color: gridTotal > selectBudget ? '#A33' : 'var(--text-muted)' }}>
+                  {gridTotal} of {selectBudget} placed
+                </p>
+              )}
+              {info.effective_mode !== 'select' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    const all = {}
+                    for (const g of info.day_grants) all[g.date] = g.quantity
+                    setDayQty(all)
+                  }}
+                >
+                  Take all my tickets
+                </button>
+              )}
+            </div>
+          )}
+          {info.allocation_status === 'pending' && !info.needs_seating && !gridActive && info.effective_mode === 'select' && (info.available_days || []).length > 0 && (
             <div className="panel" style={{ textAlign: 'left', marginBottom: 16 }}>
               <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 600 }}>Which day works for you?</p>
               {(info.available_days || []).map((d) => (
@@ -292,7 +360,12 @@ export default function PublicRSVPPage() {
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
               <button
                 className="btn btn-primary"
-                disabled={submitting || (info.effective_mode === 'select' && (info.available_days || []).length > 0 && !selectedDay)}
+                disabled={
+                  submitting ||
+                  (gridActive
+                    ? gridTotal < 1 || (selectBudget != null && gridTotal > selectBudget)
+                    : info.effective_mode === 'select' && (info.available_days || []).length > 0 && !selectedDay)
+                }
                 onClick={() => handleRespond(true)}
               >
                 Yes, I'll be there
@@ -356,6 +429,25 @@ export default function PublicRSVPPage() {
                         onChange={(e) => setRequestForm({ ...requestForm, quantity: e.target.value })}
                       />
                     </div>
+                    {gridActive && (
+                      <div>
+                        <label htmlFor="req-day" style={{ display: 'block', fontSize: 12.5, marginBottom: 4 }}>
+                          For which day?
+                        </label>
+                        <select
+                          id="req-day"
+                          value={requestForm.date}
+                          onChange={(e) => setRequestForm({ ...requestForm, date: e.target.value })}
+                        >
+                          <option value="">Any / whole visit</option>
+                          {(info.day_grants || []).map((g) => (
+                            <option key={g.date} value={g.date}>
+                              {formatDate(g.date)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div style={{ flex: 1, minWidth: 160 }}>
                       <label htmlFor="req-note" style={{ display: 'block', fontSize: 12.5, marginBottom: 4 }}>
                         Note (optional)
