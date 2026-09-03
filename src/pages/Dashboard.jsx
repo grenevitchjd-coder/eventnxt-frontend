@@ -31,7 +31,8 @@ import EventSettingsTab from '../components/EventSettingsTab'
 import TicketsSeatingTab from '../components/TicketsSeatingTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
 import GuestListTab from '../components/GuestListTab'
-import RSVPManagementTab from '../components/RSVPManagementTab'
+import InvitesTab from '../components/InvitesTab'
+import AllotmentsTab from '../components/AllotmentsTab'
 import SalesReferralsTab from '../components/SalesReferralsTab'
 import OrdersTab from '../components/OrdersTab'
 
@@ -63,8 +64,9 @@ const NAV_GROUPS = [
     label: 'Manage',
     tabs: [
       { key: 'orders', label: 'Orders' },
+      { key: 'invites', label: 'Invites' },
+      { key: 'allotments', label: 'Allotments' },
       { key: 'guests', label: 'Guest list' },
-      { key: 'rsvp', label: 'RSVPs' },
     ],
   },
 ]
@@ -158,10 +160,12 @@ export default function Dashboard() {
         return <HomeTab key={eventId} {...props} />
       case 'workspace':
         return <EventWorkspaceTab key={eventId} {...props} />
+      case 'invites':
+        return <InvitesTab key={eventId} {...props} />
+      case 'allotments':
+        return <AllotmentsTab key={eventId} {...props} />
       case 'guests':
         return <GuestListTab key={eventId} {...props} />
-      case 'rsvp':
-        return <RSVPManagementTab key={eventId} {...props} />
       case 'sales':
         return <SalesReferralsTab key={eventId} {...props} />
       case 'settings':

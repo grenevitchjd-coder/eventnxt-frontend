@@ -21,7 +21,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
 
   // ---- Guest types (accordion) ----
-  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: '' })
+  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite' })
   const [creatingType, setCreatingType] = useState(false)
   const [editingTypeId, setEditingTypeId] = useState(null)
   const [typeEditForm, setTypeEditForm] = useState({ name: '', guest_mode: '' })
@@ -70,7 +70,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     try {
       await api.createGuestType(loadedEventId, { name: typeForm.name, guest_mode: typeForm.guest_mode || null })
       onToast(`"${typeForm.name}" added`)
-      setTypeForm({ name: '' })
+      setTypeForm({ name: '', guest_mode: 'invite' })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -239,16 +239,18 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                 />
               </div>
               <div className="field">
-                <label htmlFor="type-mode">Guest experience</label>
+                <label htmlFor="type-mode" title="Which page guests of this type live on, and which flow they get">
+                  Offering type
+                </label>
                 <select
                   id="type-mode"
                   value={typeForm.guest_mode}
                   onChange={(e) => setTypeForm({ ...typeForm, guest_mode: e.target.value })}
                 >
-                  <option value="">Auto — distribute if allotments, else invite</option>
-                  <option value="invite">Invite — RSVP for themselves</option>
-                  <option value="distribute">Distribute — hands out an allotment</option>
-                  <option value="select">Select — picks their own day</option>
+                  <option value="invite">Guest invite — RSVPs for themselves (Invites page)</option>
+                  <option value="select">Guest invite — picks their own days (Invites page)</option>
+                  <option value="distribute">Allotment — hands tickets out to their people (Allotments page)</option>
+                  <option value="">Auto (legacy) — allotment if budgeted, else invite</option>
                 </select>
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
@@ -289,10 +291,10 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               value={typeEditForm.guest_mode}
                               onChange={(e) => setTypeEditForm({ ...typeEditForm, guest_mode: e.target.value })}
                             >
-                              <option value="">Auto mode</option>
-                              <option value="invite">Invite</option>
-                              <option value="distribute">Distribute</option>
-                              <option value="select">Select</option>
+                              <option value="invite">Guest invite — RSVPs for themselves</option>
+                              <option value="select">Guest invite — picks their own days</option>
+                              <option value="distribute">Allotment — hands tickets out</option>
+                              <option value="">Auto (legacy)</option>
                             </select>
                         </td>
                         <td className="actions-cell">

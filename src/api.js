@@ -175,11 +175,12 @@ export const api = {
     request(`/events/${eventId}/guests`, { method: 'POST', body: JSON.stringify(payload) }),
   updateGuest: (eventId, guestId, payload) =>
     request(`/events/${eventId}/guests/${guestId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  setGuestSentStatus: (eventId, guestId, sent) =>
+  setGuestSentStatus: (eventId, guestId, sent, marker = 'link') =>
     request(`/events/${eventId}/guests/${guestId}/sent-status`, {
       method: 'PATCH',
-      body: JSON.stringify({ sent }),
+      body: JSON.stringify({ sent, marker }),
     }),
+  getDoorRoster: (eventId) => request(`/events/${eventId}/guests/roster/door`),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
   // Comp ticketing (guest modes)
   sendGuestTicket: (eventId, guestId) =>
