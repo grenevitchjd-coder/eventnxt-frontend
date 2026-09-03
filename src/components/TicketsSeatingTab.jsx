@@ -237,7 +237,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         row: normName(composer.basis === 'row' ? composer.row_label : ''),
         secs: parsedSections.map(normName).sort(),
       })
-      const match = seatedFamilies().find(
+      const match = passFamilies().find(
         (f) =>
           JSON.stringify({
             row: normName(f.pool.row_label || ''),
@@ -414,33 +414,42 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   // trailing space or case difference can't split a day-family.
   const normName = (s) => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
 
-  // Dated, assigned-seat families (the fan-out shape a pass can ride
-  // on): grouped by normalized name, 2+ distinct days, every night's
-  // pool seat-grain. Each carries a template night + its structure for
-  // the composer's duplicate-inventory check.
-  const seatedFamilies = () => {
+  // Dated families a pass can ride on (the fan-out shape): grouped by
+  // normalized name, 2+ distinct days, and a UNIFORM selling grain —
+  // all assigned seats ('seat'), all sectioned rows ('row'), or all
+  // plain GA ('ga', pools optional). Table and mixed-grain families
+  // aren't pass-able. Each family carries a template night + its pool
+  // structure for the composer's duplicate-inventory check.
+  const passFamilies = () => {
     const groups = {}
     ;(ticketTypes || []).forEach((t) => {
       if (!t.valid_date || t.is_pass) return
-      const pool = poolFor(t)
-      if (!pool || pool.sales_grain !== 'seat') return
       const key = normName(t.name)
-      if (!groups[key]) groups[key] = { key, name: t.name, template: t, days: new Set(), pool }
+      if (!groups[key]) groups[key] = { key, name: t.name, template: t, days: new Set(), pools: [] }
       groups[key].days.add(t.valid_date)
+      groups[key].pools.push(poolFor(t))
     })
-    return Object.values(groups).filter((g) => g.days.size >= 2)
+    return Object.values(groups)
+      .map((g) => {
+        const grains = new Set(g.pools.map((p) => (p ? p.sales_grain : 'ga')))
+        const grain =
+          g.pools.every(Boolean) && grains.size === 1 && grains.has('seat')
+            ? 'seat'
+            : g.pools.every(Boolean) && grains.size === 1 && grains.has('row')
+              ? 'row'
+              : [...grains].every((x) => x === 'ga')
+                ? 'ga'
+                : null
+        return { ...g, grain, pool: g.pools.find(Boolean) || null }
+      })
+      .filter((g) => g.days.size >= 2 && g.grain)
   }
 
-  // A nightly type can grow an all-days pass when: mixed span, seated
-  // pool, and the same-named family covers 2+ days (the fan-out shape).
+  // A nightly type can grow an all-days pass when: mixed span and its
+  // normalized-name family is pass-able (2+ days, uniform grain).
   const passEligible = (t) => {
     if (eventSettings?.ticket_span !== 'mixed' || !t.valid_date || t.is_pass) return false
-    const pool = poolFor(t)
-    if (!pool || pool.sales_grain !== 'seat') return false
-    const familyDays = new Set(
-      (ticketTypes || []).filter((x) => normName(x.name) === normName(t.name) && x.valid_date).map((x) => x.valid_date)
-    )
-    return familyDays.size >= 2
+    return passFamilies().some((f) => f.key === normName(t.name))
   }
 
   // ---------- Convert a standalone all-days type into a pass ----------
@@ -450,13 +459,13 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   // family — its own duplicate seats are discarded and it starts
   // consuming the real nightly inventory.
   const convertEligible = (t) =>
-    eventSettings?.ticket_span === 'mixed' && !t.valid_date && !t.is_pass && seatedFamilies().length > 0
+    eventSettings?.ticket_span === 'mixed' && !t.valid_date && !t.is_pass && passFamilies().length > 0
 
   const openConvertForm = (t) => {
     setSectionsOpenId(null)
     setSeatsOpenId(null)
     setPassOpenId(null)
-    const fams = seatedFamilies()
+    const fams = passFamilies()
     const pool = poolFor(t)
     // Preselect the family whose structure matches this type's own
     // sections (same normalized row + section labels), when one does.
@@ -476,7 +485,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   }
 
   const submitConvert = async (t) => {
-    const fam = seatedFamilies().find((f) => f.key === convertFamilyKey)
+    const fam = passFamilies().find((f) => f.key === convertFamilyKey)
     if (!fam) return
     setConverting(true)
     try {
@@ -1307,10 +1316,15 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                             All-days pass from &ldquo;{t.name}&rdquo;
                           </div>
                           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
-                            One product, one price, every night: the buyer picks a seat once and keeps
-                            that exact seat on all {new Set((ticketTypes || []).filter((x) => normName(x.name) === normName(t.name) && x.valid_date).map((x) => x.valid_date)).size} nights.
-                            It owns no inventory — availability is the seats themselves (free on every
-                            night), plus the cap below.
+                            One product, one price, all{' '}
+                            {new Set((ticketTypes || []).filter((x) => normName(x.name) === normName(t.name) && x.valid_date).map((x) => x.valid_date)).size} nights.{' '}
+                            {poolFor(t)?.sales_grain === 'seat'
+                              ? 'The buyer picks a seat once and keeps that exact seat every night.'
+                              : poolFor(t)?.sales_grain === 'row'
+                                ? 'The buyer picks a section for each night — same one or a new view every show.'
+                                : 'One admission every night.'}{' '}
+                            It owns no inventory — availability comes live from the nights themselves
+                            (the thinnest night is the ceiling), plus the cap below.
                           </p>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                             <div className="field" style={{ width: 220 }}>
@@ -1357,9 +1371,10 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                             <div className="field" style={{ width: 280 }}>
                               <label>Share seats with (nightly tickets)</label>
                               <select value={convertFamilyKey} onChange={(e) => setConvertFamilyKey(e.target.value)}>
-                                {seatedFamilies().map((f) => (
+                                {passFamilies().map((f) => (
                                   <option key={f.key} value={f.key}>
                                     {f.name} — {f.days.size} nights
+                                    {f.grain === 'seat' ? ' · assigned seats' : f.grain === 'row' ? ' · by section' : ' · GA'}
                                   </option>
                                 ))}
                               </select>

@@ -1,3 +1,4 @@
+// eventnxt-frontend: src/pages/PublicEventPage.jsx
 import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { loadGoogleFont, SocialIcon, platformLabel } from '../socialAndFonts'
@@ -69,6 +70,9 @@ export default function PublicEventPage() {
   const [pickDraft, setPickDraft] = useState({})
   // Sectioned unassigned types: the buyer's chosen section per ticket type.
   const [sectionChoice, setSectionChoice] = useState({})
+  // Sectioned all-days passes: the chosen section PER NIGHT — the buyer
+  // may sit somewhere new each show. {ttId: {isoDate: zoneSectionId}}
+  const [passNightChoice, setPassNightChoice] = useState({})
   const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
@@ -266,12 +270,23 @@ export default function PublicEventPage() {
 
   const chosenSection = (t) => (t.sections || []).find((x) => x.id === sectionChoice[t.id]) || null
 
+  const isSectionedPass = (t) => (t.pass_nights || []).length > 0
+
   const unitCap = (t) => {
     let cap = Math.min(t.max_per_order, t.available)
     if (t.section_required) {
       const sec = chosenSection(t)
       if (!sec) return 0
       cap = Math.min(cap, Math.floor(sec.remaining / (t.admits || 1)))
+    }
+    if (isSectionedPass(t)) {
+      // Every night needs a pick; the tightest picked section is the cap.
+      for (const night of t.pass_nights) {
+        const picked = (passNightChoice[t.id] || {})[night.date]
+        const sec = (night.sections || []).find((x) => x.id === picked)
+        if (!sec) return 0
+        cap = Math.min(cap, sec.remaining)
+      }
     }
     return cap
   }
@@ -335,9 +350,15 @@ export default function PublicEventPage() {
             .map((t) =>
               t.assigned_seating
                 ? { ticket_type_id: t.id, quantity: qtyFor(t), seat_ids: seatPicks[t.id] }
-                : t.section_required
-                  ? { ticket_type_id: t.id, quantity: quantities[t.id], zone_section_id: sectionChoice[t.id] }
-                  : { ticket_type_id: t.id, quantity: quantities[t.id] }
+                : isSectionedPass(t)
+                  ? {
+                      ticket_type_id: t.id,
+                      quantity: quantities[t.id],
+                      zone_section_ids: t.pass_nights.map((n) => (passNightChoice[t.id] || {})[n.date]),
+                    }
+                  : t.section_required
+                    ? { ticket_type_id: t.id, quantity: quantities[t.id], zone_section_id: sectionChoice[t.id] }
+                    : { ticket_type_id: t.id, quantity: quantities[t.id] }
             ),
           promo_code: buyer.promo.trim() || null,
         }),
@@ -457,6 +478,53 @@ export default function PublicEventPage() {
                       <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
                         {qtyFor(t) > 0 ? `${qtyFor(t)} seat${qtyFor(t) === 1 ? '' : 's'} picked` : 'Pick your seats below'}
                       </span>
+                    ) : t.on_sale && isSectionedPass(t) ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        {t.pass_nights.map((night) => (
+                          <label key={night.date || 'night'} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            {night.date ? dayLabel(night.date) : 'Night'}
+                            <select
+                              value={(passNightChoice[t.id] || {})[night.date] || ''}
+                              onChange={(e) => {
+                                setPassNightChoice({
+                                  ...passNightChoice,
+                                  [t.id]: { ...(passNightChoice[t.id] || {}), [night.date]: e.target.value },
+                                })
+                                setQuantities({ ...quantities, [t.id]: 0 })
+                              }}
+                              aria-label={`Section for ${night.date || 'this night'}`}
+                            >
+                              <option value="">Section…</option>
+                              {(night.sections || []).map((x) => (
+                                <option key={x.id} value={x.id} disabled={x.remaining < 1}>
+                                  {x.section_label}
+                                  {x.row_label ? ` · ${x.row_label}` : ''}
+                                  {x.remaining < 1 ? ' — full' : ` · ${x.remaining} left`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                        <div className="ticket-qty-stepper">
+                          <button type="button" onClick={() => setQty(t, qtyFor(t) - 1)} disabled={qtyFor(t) === 0} aria-label="fewer">
+                            −
+                          </button>
+                          <span>{qtyFor(t)}</span>
+                          <button
+                            type="button"
+                            onClick={() => setQty(t, qtyFor(t) + 1)}
+                            disabled={unitCap(t) === 0 || qtyFor(t) >= unitCap(t)}
+                            aria-label="more"
+                          >
+                            +
+                          </button>
+                        </div>
+                        {unitCap(t) === 0 && qtyFor(t) === 0 && (
+                          <span style={{ flexBasis: '100%', textAlign: 'right', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            Pick a section for every night — a different one each night is fine.
+                          </span>
+                        )}
+                      </div>
                     ) : t.on_sale && t.section_required ? (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <select
