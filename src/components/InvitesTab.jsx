@@ -72,7 +72,7 @@ export default function InvitesTab({ onToast, eventId }) {
     seating_category_id: '',
     section_label: '',
     visit_date: '',
-    allocation_status: 'confirmed',
+    allocation_status: 'pending',
     party_size: 1,
     perks: '',
     comments: '',
@@ -192,7 +192,7 @@ export default function InvitesTab({ onToast, eventId }) {
         seating_category_id: '',
         section_label: '',
         visit_date: '',
-        allocation_status: 'confirmed',
+        allocation_status: 'pending',
         party_size: 1,
         perks: '',
         comments: '',
@@ -871,8 +871,8 @@ export default function InvitesTab({ onToast, eventId }) {
                   value={guestForm.allocation_status}
                   onChange={(e) => setGuestForm({ ...guestForm, allocation_status: e.target.value })}
                 >
-                  <option value="confirmed">Confirmed</option>
-                  <option value="pending">Pending</option>
+                  <option value="pending">Pending — confirms when they RSVP</option>
+                  <option value="confirmed">Confirmed — mints tickets immediately</option>
                   <option value="declined">Declined</option>
                 </select>
               </div>
@@ -1186,8 +1186,8 @@ export default function InvitesTab({ onToast, eventId }) {
                 <label>Status</label>
                 <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                   <option value="">All statuses</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="pending">Pending</option>
+                  <option value="pending">Pending — confirms when they RSVP</option>
+                  <option value="confirmed">Confirmed — mints tickets immediately</option>
                   <option value="declined">Declined</option>
                 </select>
               </div>
