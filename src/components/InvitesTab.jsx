@@ -88,16 +88,15 @@ export default function InvitesTab({ onToast, eventId }) {
   const [queueBusyId, setQueueBusyId] = useState(null)
   const [queueSectionPick, setQueueSectionPick] = useState({}) // guestId -> categoryId
   const [creatingGuest, setCreatingGuest] = useState(false)
-  const [editingGuestId, setEditingGuestId] = useState(null)
-  const [guestEditForm, setGuestEditForm] = useState(null)
-  const [savingGuest, setSavingGuest] = useState(false)
+  // ---- The spreadsheet grid: pending edits per guest, saved in one
+  // batch. Keys per guest: guest_type_id, seating_category_id,
+  // section_label, party_size, spend_total, hold_timing,
+  // allocation_status, and day:<iso> for per-day amounts.
+  const [gridEdits, setGridEdits] = useState({})
+  const [savingGrid, setSavingGrid] = useState(false)
+  const [committing, setCommitting] = useState(false)
 
   // ---- Per-guest ticket allotment override (expandable panel per row) ----
-  const [expandedAllotmentGuestId, setExpandedAllotmentGuestId] = useState(null)
-  const [allotmentDraftRows, setAllotmentDraftRows] = useState([]) // [{date, quantity}]
-  const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
-  const [savingGuestAllotment, setSavingGuestAllotment] = useState(false)
-  const [spendTotalDraft, setSpendTotalDraft] = useState('')
 
   // Reserved-seat assignment (guests in an assigned-seating area)
   const [seatsGuestId, setSeatsGuestId] = useState(null)
@@ -170,44 +169,17 @@ export default function InvitesTab({ onToast, eventId }) {
     e.preventDefault()
     setCreatingGuest(true)
     try {
-      await api.createGuest(loadedEventId, {
-        name: guestForm.name,
-        email: guestForm.email,
+      const created = await api.createGuest(loadedEventId, {
+        name: guestForm.name.trim(),
+        email: guestForm.email.trim(),
         guest_type_id: guestForm.guest_type_id,
-        seating_category_id: guestForm.seating_category_id || null,
-        section_label: (guestForm.seating_category_id && guestForm.section_label) || null,
-        visit_date: guestForm.visit_date || null,
-        allocation_status: guestForm.allocation_status,
-        party_size: Number(guestForm.party_size) || 1,
-        perks: guestForm.perks || null,
-        comments: guestForm.comments || null,
-        guest_mode: guestForm.guest_mode || null,
-        hold_timing: guestForm.hold_timing || 'now',
-        cohort_together: guestForm.cohort_together !== false,
-        ticket_allotment: (() => {
-          const rows = Object.entries(guestForm.day_grants || {})
-            .filter(([, q]) => q !== '' && Number(q) > 0)
-            .map(([date, q]) => ({ date, quantity: Number(q) }))
-          return rows.length ? rows : undefined
-        })(),
-      })
-      onToast(`${guestForm.name} added`)
-      setGuestForm({
-        name: '',
-        email: '',
-        guest_type_id: '',
-        seating_category_id: '',
-        section_label: '',
-        visit_date: '',
         allocation_status: 'pending',
         party_size: 1,
-        perks: '',
-        comments: '',
-        guest_mode: '',
-        hold_timing: 'now',
-        cohort_together: true,
-        day_grants: {},
+        perks: null,
+        comments: null,
       })
+      onToast(`${created.name} added — adjust their row below, then Save & send invites`)
+      setGuestForm({ name: '', email: '', guest_type_id: guestForm.guest_type_id })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -231,48 +203,109 @@ export default function InvitesTab({ onToast, eventId }) {
     }
   }
 
-  const startEditGuest = (guest) => {
-    setEditingGuestId(guest.id)
-    setGuestEditForm({
-      name: guest.name,
-      email: guest.email,
-      guest_type_id: guest.guest_type_id,
-      seating_category_id: guest.seating_category_id || '',
-      section_label: guest.section_label || '',
-      visit_date: guest.visit_date || '',
-      allocation_status: guest.allocation_status,
-      party_size: guest.party_size || 1,
-      perks: guest.perks || '',
-      comments: guest.comments || '',
-      guest_mode: guest.guest_mode || '',
-      hold_timing: guest.hold_timing || 'now',
-    })
+
+  // ---------- Grid editing ----------
+
+  const dayRowsOf = (g) => Object.fromEntries((g.ticket_allotment || []).map((r) => [r.date, r.quantity]))
+
+  const gridVal = (g, field) => {
+    const e = gridEdits[g.id]
+    if (e && field in e) return e[field]
+    if (field.startsWith('day:')) {
+      const v = dayRowsOf(g)[field.slice(4)]
+      return v === undefined ? '' : String(v)
+    }
+    if (field === 'spend_total') return g.spend_total ? String(g.spend_total) : ''
+    if (field === 'party_size') return String(g.party_size || 1)
+    if (field === 'hold_timing') return g.hold_timing || 'now'
+    if (field === 'section_label') return g.section_label || ''
+    if (field === 'seating_category_id') return g.seating_category_id || ''
+    return g[field] ?? ''
   }
 
-  const saveEditGuest = async (guestId) => {
-    setSavingGuest(true)
+  const setGridVal = (g, field, value) =>
+    setGridEdits((prev) => ({ ...prev, [g.id]: { ...(prev[g.id] || {}), [field]: value } }))
+
+  const dirtyIds = Object.keys(gridEdits).filter((id) => Object.keys(gridEdits[id] || {}).length > 0)
+
+  // The type's derived offer, for placeholder hints on untouched day
+  // cells ("2" ghosted = comes from the type's all-days/choose default).
+  const typeDerivedCount = (g) => {
+    const t = guestTypes.find((x) => x.id === (gridVal(g, 'guest_type_id') || g.guest_type_id))
+    return t && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count ? t.default_ticket_count : null
+  }
+
+  const buildGridPayload = (g) => {
+    const e = gridEdits[g.id] || {}
+    const touchedDays = Object.keys(e).some((k) => k.startsWith('day:'))
+    let ticket_allotment = null // null = leave the guest's rows as they are
+    if (touchedDays) {
+      ticket_allotment = guestEventDays
+        .map((d) => ({ date: d, quantity: parseInt(gridVal(g, `day:${d}`), 10) || 0 }))
+        .filter((r) => r.quantity > 0)
+    }
+    return {
+      name: g.name,
+      email: g.email,
+      guest_type_id: gridVal(g, 'guest_type_id') || g.guest_type_id,
+      seating_category_id: gridVal(g, 'seating_category_id') || null,
+      section_label: gridVal(g, 'section_label') || null,
+      visit_date: g.visit_date || null,
+      allocation_status: gridVal(g, 'allocation_status') || g.allocation_status,
+      party_size: parseInt(gridVal(g, 'party_size'), 10) || 1,
+      perks: g.perks || null,
+      comments: g.comments || null,
+      guest_mode: g.guest_mode ?? null,
+      hold_timing: gridVal(g, 'hold_timing') || 'now',
+      spend_total: parseInt(gridVal(g, 'spend_total'), 10) || null,
+      cohort_together: g.cohort_together,
+      ...(ticket_allotment !== null ? { ticket_allotment } : {}),
+    }
+  }
+
+  const saveGrid = async () => {
+    if (dirtyIds.length === 0) return 0
+    setSavingGrid(true)
+    let saved = 0
     try {
-      await api.updateGuest(loadedEventId, guestId, {
-        name: guestEditForm.name,
-        email: guestEditForm.email,
-        guest_type_id: guestEditForm.guest_type_id,
-        seating_category_id: guestEditForm.seating_category_id || null,
-        section_label: (guestEditForm.seating_category_id && guestEditForm.section_label) || null,
-        visit_date: guestEditForm.visit_date || null,
-        allocation_status: guestEditForm.allocation_status,
-        party_size: Number(guestEditForm.party_size) || 1,
-        perks: guestEditForm.perks || null,
-        comments: guestEditForm.comments || null,
-        guest_mode: guestEditForm.guest_mode ?? null,
-        hold_timing: guestEditForm.hold_timing || 'now',
-      })
-      onToast('Saved')
-      setEditingGuestId(null)
+      for (const id of dirtyIds) {
+        const g = (guests || []).find((x) => x.id === id)
+        if (!g) continue
+        await api.updateGuest(loadedEventId, id, buildGridPayload(g))
+        saved++
+      }
+      setGridEdits({})
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+      loadEventData(loadedEventId)
+    } finally {
+      setSavingGrid(false)
+    }
+    return saved
+  }
+
+  // "Add to Invites List": commit every pending row edit, then email
+  // every invitee who hasn't been sent their link yet — the one button
+  // that turns drafts into real, delivered invites.
+  const saveAndSendInvites = async () => {
+    setCommitting(true)
+    try {
+      const saved = await saveGrid()
+      const res = await api.sendGuestInvitesBulk(loadedEventId)
+      const parts = []
+      if (saved) parts.push(`${saved} change${saved === 1 ? '' : 's'} saved`)
+      parts.push(
+        res.sent === 0 && res.failed === 0
+          ? 'everyone already invited'
+          : `${res.sent} invite${res.sent === 1 ? '' : 's'} emailed${res.failed ? `, ${res.failed} failed` : ''}`
+      )
+      onToast(parts.join(' · '), res.failed > 0)
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
     } finally {
-      setSavingGuest(false)
+      setCommitting(false)
     }
   }
 
@@ -353,62 +386,6 @@ export default function InvitesTab({ onToast, eventId }) {
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
-    }
-  }
-
-  // ---------- Per-guest ticket allotment override panel ----------
-
-  const toggleAllotmentPanel = (guest) => {
-    setSpendTotalDraft(guest.spend_total ? String(guest.spend_total) : '')
-    if (expandedAllotmentGuestId === guest.id) {
-      setExpandedAllotmentGuestId(null)
-      return
-    }
-    setExpandedAllotmentGuestId(guest.id)
-    setSeatsGuestId(null) // one expander at a time
-    setAllotmentDraftRows(guest.ticket_allotment || [])
-    setNewAllotmentDay({ date: '', quantity: '' })
-  }
-
-  const addAllotmentDraftRow = () => {
-    if (!newAllotmentDay.date || newAllotmentDay.quantity === '') return
-    const qty = Number(newAllotmentDay.quantity)
-    setAllotmentDraftRows((prev) => {
-      const withoutThisDate = prev.filter((r) => r.date !== newAllotmentDay.date)
-      return [...withoutThisDate, { date: newAllotmentDay.date, quantity: qty }]
-    })
-    setNewAllotmentDay({ date: '', quantity: '' })
-  }
-
-  const removeAllotmentDraftRow = (date) => {
-    setAllotmentDraftRows((prev) => prev.filter((r) => r.date !== date))
-  }
-
-  const saveGuestAllotment = async (guest) => {
-    setSavingGuestAllotment(true)
-    try {
-      await api.updateGuest(loadedEventId, guest.id, {
-        name: guest.name,
-        email: guest.email,
-        guest_type_id: guest.guest_type_id,
-        seating_category_id: guest.seating_category_id || null,
-        section_label: guest.section_label || null,
-        visit_date: guest.visit_date || null,
-        allocation_status: guest.allocation_status,
-        party_size: guest.party_size || 1,
-        perks: guest.perks || null,
-        comments: guest.comments || null,
-        guest_mode: guest.guest_mode ?? null,
-        hold_timing: guest.hold_timing || 'now',
-        ticket_allotment: allotmentDraftRows,
-        spend_total: parseInt(spendTotalDraft, 10) || null,
-      })
-      onToast('Ticket allotment saved')
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingGuestAllotment(false)
     }
   }
 
@@ -721,24 +698,6 @@ export default function InvitesTab({ onToast, eventId }) {
     }
   }
 
-  const [bulkEmailing, setBulkEmailing] = useState(false)
-  const emailAllUnsent = async () => {
-    setBulkEmailing(true)
-    try {
-      const res = await api.sendGuestInvitesBulk(loadedEventId)
-      onToast(
-        res.sent === 0 && res.failed === 0
-          ? 'Everyone already has their invite'
-          : `Emailed ${res.sent} invite${res.sent === 1 ? '' : 's'}${res.failed ? ` — ${res.failed} failed (check email settings)` : ''}`,
-        res.failed > 0
-      )
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setBulkEmailing(false)
-    }
-  }
 
   const copyRsvpLink = async (guest) => {
     try {
@@ -796,7 +755,7 @@ export default function InvitesTab({ onToast, eventId }) {
 
           {/* ---------- Add a single guest ---------- */}
           <div className="panel">
-            <div className="panel-title">Add a guest</div>
+            <div className="panel-title">Add people</div>
             <form className="inline-form" onSubmit={handleCreateGuest}>
               <div className="field">
                 <label htmlFor="g-name">Name</label>
@@ -835,161 +794,15 @@ export default function InvitesTab({ onToast, eventId }) {
                   ))}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="g-category">Seating category</label>
-                <select
-                  id="g-category"
-                  value={guestForm.seating_category_id}
-                  onChange={(e) => setGuestForm({ ...guestForm, seating_category_id: e.target.value })}
-                >
-                  <option value="">Auto (from guest type's priority list)</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {sectionLabelsOf(guestForm.seating_category_id).length > 0 && (
-                <div className="field">
-                  <label htmlFor="g-section">Section</label>
-                  <select
-                    id="g-section"
-                    value={guestForm.section_label}
-                    onChange={(e) => setGuestForm({ ...guestForm, section_label: e.target.value })}
-                  >
-                    <option value="">Anywhere in this area</option>
-                    {sectionLabelsOf(guestForm.seating_category_id).map((lbl) => (
-                      <option key={lbl} value={lbl}>
-                        Section {lbl}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {guestEventDays.length > 0 && (
-                <div className="field" style={{ minWidth: 240 }}>
-                  <label title="Invite mode: tickets minted per day. Distribute mode: the budget they hand out.">
-                    Per-day tickets
-                  </label>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {guestEventDays.map((d) => (
-                      <div key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{fmtGuestDay(d)}</span>
-                        <input
-                          id={`ga-${d}`}
-                          type="number"
-                          min={0}
-                          placeholder="—"
-                          style={{ width: 54, textAlign: 'center' }}
-                          value={guestForm.day_grants?.[d] ?? ''}
-                          onChange={(e) =>
-                            setGuestForm({
-                              ...guestForm,
-                              day_grants: { ...(guestForm.day_grants || {}), [d]: e.target.value },
-                            })
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {guestEventDays.length > 0 && (
-                <div className="field">
-                  <label htmlFor="g-day">Day</label>
-                  <select
-                    id="g-day"
-                    value={guestForm.visit_date}
-                    onChange={(e) => setGuestForm({ ...guestForm, visit_date: e.target.value })}
-                  >
-                    <option value="">Whole event</option>
-                    {guestEventDays.map((d) => (
-                      <option key={d} value={d}>
-                        {fmtGuestDay(d)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <div className="field">
-                <label htmlFor="g-status">Status</label>
-                <select
-                  id="g-status"
-                  value={guestForm.allocation_status}
-                  onChange={(e) => setGuestForm({ ...guestForm, allocation_status: e.target.value })}
-                >
-                  <option value="pending">Pending — confirms when they RSVP</option>
-                  <option value="confirmed">Confirmed — mints tickets immediately</option>
-                  <option value="declined">Declined</option>
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="g-mode">Day choice</label>
-                <select
-                  id="g-mode"
-                  value={guestForm.guest_mode}
-                  onChange={(e) => setGuestForm({ ...guestForm, guest_mode: e.target.value })}
-                >
-                  <option value="">From guest type</option>
-                  <option value="invite">Days set by you</option>
-                  <option value="select">Guest picks their days</option>
-                </select>
-              </div>
-              {!externalTicketing && (
-                <div className="field">
-                  <label htmlFor="g-hold" title="When this guest's tickets are pulled from sellable inventory">
-                    Pull from inventory
-                  </label>
-                  <select
-                    id="g-hold"
-                    value={guestForm.hold_timing}
-                    onChange={(e) => setGuestForm({ ...guestForm, hold_timing: e.target.value })}
-                  >
-                    <option value="now">Now — held the moment it's sent</option>
-                    <option value="on_confirm">On RSVP yes</option>
-                    <option value="later">Later — no hold yet</option>
-                  </select>
-                </div>
-              )}
-              <div className="field">
-                <label htmlFor="g-party-size">Party size</label>
-                <input
-                  id="g-party-size"
-                  type="number"
-                  min={1}
-                  style={{ width: 80 }}
-                  value={guestForm.party_size}
-                  onChange={(e) => setGuestForm({ ...guestForm, party_size: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-perks">Perks</label>
-                <input
-                  id="g-perks"
-                  placeholder="drinks, gift bag…"
-                  style={{ width: 140 }}
-                  value={guestForm.perks}
-                  onChange={(e) => setGuestForm({ ...guestForm, perks: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-comments">Comments</label>
-                <input
-                  id="g-comments"
-                  placeholder="notes…"
-                  style={{ width: 160 }}
-                  value={guestForm.comments}
-                  onChange={(e) => setGuestForm({ ...guestForm, comments: e.target.value })}
-                />
-              </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingGuest}>
                 Add guest
               </button>
             </form>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
-              Giving someone a budget of tickets to hand out (sponsors, agencies)? That's an
-              allotment — set it up on the Allotments page instead.
+              Just name, email, and type — they land in the list below with their type's defaults,
+              where you adjust days, amounts, seating, and timing across the row, then hit
+              <strong> Save &amp; send invites</strong>. Nothing is emailed until you do. Ticket
+              hand-out budgets (sponsors, agencies) live on the Allotments page.
             </p>
           </div>
 
@@ -1262,8 +1075,24 @@ export default function InvitesTab({ onToast, eventId }) {
                   {externalTicketing && <option value="tickets_not_sent">Tickets not sent</option>}
                 </select>
               </div>
-              <button className="btn btn-secondary" disabled={bulkEmailing} onClick={emailAllUnsent} title="Emails every invitee without a sent stamp their RSVP link">
-                {bulkEmailing ? 'Emailing…' : 'Email all unsent'}
+              <button
+                className="btn btn-secondary"
+                disabled={savingGrid || committing || dirtyIds.length === 0}
+                onClick={async () => {
+                  const n = await saveGrid()
+                  if (n) onToast(`${n} change${n === 1 ? '' : 's'} saved — nothing emailed yet`)
+                }}
+                title="Save row edits without emailing anyone"
+              >
+                {savingGrid && !committing ? 'Saving…' : `Save changes${dirtyIds.length ? ` (${dirtyIds.length})` : ''}`}
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={committing || savingGrid}
+                onClick={saveAndSendInvites}
+                title="Save every row edit, then email every invitee who hasn't received their link"
+              >
+                {committing ? 'Sending…' : 'Save & send invites'}
               </button>
               <button className="btn btn-secondary" onClick={handleExportGuests}>
                 Download CSV
@@ -1278,11 +1107,16 @@ export default function InvitesTab({ onToast, eventId }) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Email</th>
                 <th>Type</th>
-                <th>Category</th>
+                <th>Seating</th>
+                {guestEventDays.map((d) => (
+                  <th key={d} style={{ textAlign: 'center' }}>{fmtGuestDay(d)}</th>
+                ))}
+                <th title="Heads in the party — also the seat count when hand-assigning">Party</th>
+                <th title="Set LOWER than the day amounts to let the guest choose where to spend">Total</th>
+                {!externalTicketing && <th title="When tickets are pulled from sellable inventory">Pull</th>}
                 <th>Status</th>
-                <th>Tickets</th>
+                <th>Progress</th>
                 <th>Sent</th>
                 <th>RSVP link</th>
                 <th></th>
@@ -1291,182 +1125,14 @@ export default function InvitesTab({ onToast, eventId }) {
             <tbody>
               {visibleGuests.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="empty-state">
-                    {guests.length === 0 ? 'No guests yet.' : 'No guests match the current filters.'}
+                  <td colSpan={10 + guestEventDays.length} className="empty-state">
+                    {guests.length === 0 ? 'No guests yet — add people above.' : 'No guests match the current filters.'}
                   </td>
                 </tr>
               ) : (
                 visibleGuests.map((g) => (
                   <Fragment key={g.id}>
-                    {editingGuestId === g.id ? (
-                      <tr>
-                        <td>
-                          <input
-                            value={guestEditForm.name}
-                            onChange={(e) => setGuestEditForm({ ...guestEditForm, name: e.target.value })}
-                            style={{ width: '100%' }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="email"
-                            value={guestEditForm.email}
-                            onChange={(e) => setGuestEditForm({ ...guestEditForm, email: e.target.value })}
-                            style={{ width: '100%' }}
-                          />
-                        </td>
-                        <td>
-                          <select
-                            style={selectStyle}
-                            value={guestEditForm.guest_type_id}
-                            onChange={(e) => setGuestEditForm({ ...guestEditForm, guest_type_id: e.target.value })}
-                          >
-                            {guestTypes.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <select
-                            style={selectStyle}
-                            value={guestEditForm.seating_category_id}
-                            onChange={(e) =>
-                              setGuestEditForm({ ...guestEditForm, seating_category_id: e.target.value })
-                            }
-                          >
-                            <option value="">None</option>
-                            {categories.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                              </option>
-                            ))}
-                          </select>
-                          {sectionLabelsOf(guestEditForm.seating_category_id).length > 0 && (
-                            <select
-                              style={{ ...selectStyle, marginTop: 4 }}
-                              title="Section"
-                              value={guestEditForm.section_label}
-                              onChange={(e) => setGuestEditForm({ ...guestEditForm, section_label: e.target.value })}
-                            >
-                              <option value="">Anywhere in this area</option>
-                              {sectionLabelsOf(guestEditForm.seating_category_id).map((lbl) => (
-                                <option key={lbl} value={lbl}>
-                                  Section {lbl}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                          {guestEventDays.length > 0 && (
-                            <select
-                              style={{ ...selectStyle, marginTop: 4 }}
-                              title="Day"
-                              value={guestEditForm.visit_date || ''}
-                              onChange={(e) => setGuestEditForm({ ...guestEditForm, visit_date: e.target.value })}
-                            >
-                              <option value="">Whole event</option>
-                              {guestEventDays.map((d) => (
-                                <option key={d} value={d}>
-                                  {fmtGuestDay(d)}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td>
-                          <select
-                            style={selectStyle}
-                            value={guestEditForm.allocation_status}
-                            onChange={(e) =>
-                              setGuestEditForm({ ...guestEditForm, allocation_status: e.target.value })
-                            }
-                          >
-                            <option value="confirmed">Confirmed</option>
-                            <option value="pending">Pending</option>
-                            <option value="declined">Declined</option>
-                          </select>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <input
-                              type="number"
-                              min={1}
-                              title="Party size"
-                              style={{ ...selectStyle, width: 45 }}
-                              value={guestEditForm.party_size}
-                              onChange={(e) => setGuestEditForm({ ...guestEditForm, party_size: e.target.value })}
-                            />
-                            <input
-                              title="Perks"
-                              placeholder="Perks"
-                              style={{ ...selectStyle, width: 70 }}
-                              value={guestEditForm.perks}
-                              onChange={(e) => setGuestEditForm({ ...guestEditForm, perks: e.target.value })}
-                            />
-                            <input
-                              title="Comments"
-                              placeholder="Comments"
-                              style={{ ...selectStyle, width: 80 }}
-                              value={guestEditForm.comments}
-                              onChange={(e) => setGuestEditForm({ ...guestEditForm, comments: e.target.value })}
-                            />
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => toggleSentStatus(g)}
-                              title="RSVP link sent to this guest"
-                              style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
-                            >
-                              {g.link_sent_at ? '✓ Link sent' : 'Link not sent'}
-                            </button>
-                            {externalTicketing && (
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => toggleTicketsSent(g)}
-                                title="You ordered this guest's tickets on your external platform and sent them"
-                                style={g.tickets_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
-                              >
-                                {g.tickets_sent_at ? '✓ Tickets sent' : 'Tickets not sent'}
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <a
-                              href={rsvpUrl(g.rsvp_token)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="btn btn-secondary btn-sm"
-                            >
-                              Open
-                            </a>
-                            <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
-                              Copy
-                            </button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => emailInvite(g)} title="Email this guest their RSVP link now">
-                              Email
-                            </button>
-                          </div>
-                        </td>
-                        <td className="actions-cell">
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            disabled={savingGuest}
-                            onClick={() => saveEditGuest(g.id)}
-                          >
-                            Save
-                          </button>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingGuestId(null)}>
-                            Cancel
-                          </button>
-                        </td>
-                      </tr>
-                    ) : (
+                    {(
                       <tr>
                         <td>
                           {g.name}
@@ -1489,33 +1155,128 @@ export default function InvitesTab({ onToast, eventId }) {
                             </span>
                           )}
                         </td>
-                        <td className="mono">{g.email}</td>
-                        <td>{guestTypeName(g.guest_type_id)}</td>
                         <td>
-                          {g.seating_category_id ? categoryName(g.seating_category_id) : '—'}
-                          {g.section_label && (
-                            <span style={{ color: 'var(--text-muted)' }}> · Sec {g.section_label}</span>
+                          <select
+                            style={selectStyle}
+                            value={gridVal(g, 'guest_type_id')}
+                            onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
+                          >
+                            {guestTypes.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            style={selectStyle}
+                            title="Seating area — Auto follows the type's priorities on confirm"
+                            value={gridVal(g, 'seating_category_id')}
+                            onChange={(e) => setGridVal(g, 'seating_category_id', e.target.value)}
+                          >
+                            <option value="">Auto</option>
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                          {sectionLabelsOf(gridVal(g, 'seating_category_id')).length > 0 && (
+                            <select
+                              style={{ ...selectStyle, marginTop: 4 }}
+                              title="Section"
+                              value={gridVal(g, 'section_label')}
+                              onChange={(e) => setGridVal(g, 'section_label', e.target.value)}
+                            >
+                              <option value="">Anywhere</option>
+                              {sectionLabelsOf(gridVal(g, 'seating_category_id')).map((lbl) => (
+                                <option key={lbl} value={lbl}>
+                                  Sec {lbl}
+                                </option>
+                              ))}
+                            </select>
                           )}
                           {(g.seat_labels || []).length > 0 && (
                             <div
                               title={g.seat_labels.join('\n')}
-                              style={{ fontSize: 11.5, color: 'var(--text-muted)', cursor: 'help' }}
+                              style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'help' }}
                             >
                               {g.seat_labels.length} seat{g.seat_labels.length === 1 ? '' : 's'} assigned
                             </div>
                           )}
                         </td>
+                        {guestEventDays.map((d) => (
+                          <td key={d} style={{ textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder={typeDerivedCount(g) ? String(typeDerivedCount(g)) : '—'}
+                              title={
+                                typeDerivedCount(g) && !gridVal(g, `day:${d}`)
+                                  ? 'From the type default — type a number to override'
+                                  : 'Tickets offered for this day'
+                              }
+                              style={{ ...selectStyle, width: 48, textAlign: 'center' }}
+                              value={gridVal(g, `day:${d}`)}
+                              onChange={(e) => setGridVal(g, `day:${d}`, e.target.value)}
+                            />
+                          </td>
+                        ))}
                         <td>
-                          <span className={`pill pill-${g.allocation_status}`}>{g.allocation_status}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            style={{ ...selectStyle, width: 48, textAlign: 'center' }}
+                            value={gridVal(g, 'party_size')}
+                            onChange={(e) => setGridVal(g, 'party_size', e.target.value)}
+                          />
                         </td>
-                        <td style={{ fontSize: 12.5 }}>
-                          {g.party_size > 1 && <span>party of {g.party_size}</span>}
-                          {g.allotment_total > 0 && (
-                            <span style={{ display: 'block', color: 'var(--text-muted)' }}>
-                              {g.allotment_distributed} of {g.allotment_total} given out
-                            </span>
+                        <td>
+                          <input
+                            type="number"
+                            min={1}
+                            placeholder="all"
+                            title="Blank = fixed offer. Lower than the day amounts = the guest chooses where to spend."
+                            style={{ ...selectStyle, width: 52, textAlign: 'center' }}
+                            value={gridVal(g, 'spend_total')}
+                            onChange={(e) => setGridVal(g, 'spend_total', e.target.value)}
+                          />
+                        </td>
+                        {!externalTicketing && (
+                          <td>
+                            <select
+                              style={selectStyle}
+                              value={gridVal(g, 'hold_timing')}
+                              onChange={(e) => setGridVal(g, 'hold_timing', e.target.value)}
+                            >
+                              <option value="now">Now</option>
+                              <option value="on_confirm">On yes</option>
+                              <option value="later">Later</option>
+                            </select>
+                          </td>
+                        )}
+                        <td>
+                          <select
+                            style={selectStyle}
+                            className={`status-${gridVal(g, 'allocation_status')}`}
+                            value={gridVal(g, 'allocation_status')}
+                            onChange={(e) => setGridVal(g, 'allocation_status', e.target.value)}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="declined">Declined</option>
+                          </select>
+                        </td>
+                        <td style={{ fontSize: 12 }}>
+                          {g.rsvp_confirmed && <span>RSVP: {g.rsvp_confirmed}</span>}
+                          {g.ticket_count > 0 && (
+                            <span style={{ display: 'block', color: 'var(--text-muted)' }}>{g.ticket_count} codes</span>
                           )}
-                          {!(g.party_size > 1) && !(g.allotment_total > 0) && '—'}
+                          {g.allotment_total > 0 && g.spend_total == null && !g.ticket_count && (
+                            <span style={{ display: 'block', color: 'var(--text-muted)' }}>{g.allotment_total} offered</span>
+                          )}
+                          {!g.rsvp_confirmed && !g.ticket_count && !(g.allotment_total > 0) && '—'}
                         </td>
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1558,9 +1319,6 @@ export default function InvitesTab({ onToast, eventId }) {
                           </div>
                         </td>
                         <td className="actions-cell">
-                          <button className="btn btn-secondary btn-sm" onClick={() => toggleAllotmentPanel(g)}>
-                            Tickets
-                          </button>
                           {seatAssignable(g) && (
                             <button
                               className="btn btn-secondary btn-sm"
@@ -1578,9 +1336,6 @@ export default function InvitesTab({ onToast, eventId }) {
                               Update & resend
                             </button>
                           )}
-                          <button className="btn btn-secondary btn-sm" onClick={() => startEditGuest(g)}>
-                            Edit
-                          </button>
                           <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
                             Delete
                           </button>
@@ -1590,7 +1345,7 @@ export default function InvitesTab({ onToast, eventId }) {
                     {seatsGuestId === g.id && (
                       <tr>
                         <td></td>
-                        <td colSpan={8} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                        <td colSpan={9 + guestEventDays.length + (externalTicketing ? 0 : 1)} style={{ paddingTop: 0, paddingBottom: 16 }}>
                           <div style={{ background: 'var(--surface-alt)', borderRadius: 8, padding: '12px 14px' }}>
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                               {g.name}&apos;s seats in {categoryName(g.seating_category_id)} — party of {g.party_size}
@@ -1651,125 +1406,6 @@ export default function InvitesTab({ onToast, eventId }) {
                                 </div>
                               </>
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    {expandedAllotmentGuestId === g.id && (
-                      <tr>
-                        <td></td>
-                        <td colSpan={8} style={{ paddingTop: 0, paddingBottom: 16 }}>
-                          <div
-                            style={{
-                              background: 'var(--surface-alt)',
-                              borderRadius: 8,
-                              padding: '12px 14px',
-                            }}
-                          >
-                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              {g.name}'s ticket allotment — per-day quantities they get to hand out
-                              themselves. Leave empty to inherit {guestTypeName(g.guest_type_id)}'s default.
-                            </div>
-                            {allotmentDraftRows.length === 0 ? (
-                              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
-                                No override — inheriting the guest type's default allotment.
-                              </p>
-                            ) : (
-                              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
-                                      Date
-                                    </th>
-                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
-                                      Tickets
-                                    </th>
-                                    <th></th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {[...allotmentDraftRows]
-                                    .sort((a, b) => a.date.localeCompare(b.date))
-                                    .map((row) => (
-                                      <tr key={row.date}>
-                                        <td style={{ fontSize: 13.5, padding: '4px 0' }}>{row.date}</td>
-                                        <td style={{ fontSize: 13.5, padding: '4px 0' }} className="mono">
-                                          {row.quantity}
-                                        </td>
-                                        <td style={{ textAlign: 'right' }}>
-                                          <button
-                                            className="btn btn-danger btn-sm"
-                                            onClick={() => removeAllotmentDraftRow(row.date)}
-                                          >
-                                            Remove
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                </tbody>
-                              </table>
-                            )}
-                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                              <div className="field" style={{ width: 170 }}>
-                                <label>Date</label>
-                                {guestEventDays.length > 0 ? (
-                                  <select
-                                    value={newAllotmentDay.date}
-                                    onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
-                                  >
-                                    <option value="">Choose a day…</option>
-                                    {guestEventDays.map((d) => (
-                                      <option key={d} value={d}>
-                                        {fmtGuestDay(d)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <input
-                                    type="date"
-                                    value={newAllotmentDay.date}
-                                    onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
-                                  />
-                                )}
-                              </div>
-                              <div className="field" style={{ width: 110 }}>
-                                <label>Tickets</label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={newAllotmentDay.quantity}
-                                  onChange={(e) =>
-                                    setNewAllotmentDay({ ...newAllotmentDay, quantity: e.target.value })
-                                  }
-                                />
-                              </div>
-                              <button className="btn btn-secondary btn-sm" onClick={addAllotmentDraftRow}>
-                                Add day
-                              </button>
-                              <div className="field" style={{ width: 150 }}>
-                                <label
-                                  htmlFor={`spend-${g.id}`}
-                                  title="Set this LOWER than the day amounts to let the guest choose where to spend — e.g. 3 total across 2 Thu / 2 Sat. Blank = fixed offer."
-                                >
-                                  Total they can take
-                                </label>
-                                <input
-                                  id={`spend-${g.id}`}
-                                  type="number"
-                                  min={1}
-                                  placeholder="blank = all"
-                                  value={spendTotalDraft}
-                                  onChange={(e) => setSpendTotalDraft(e.target.value)}
-                                />
-                              </div>
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                disabled={savingGuestAllotment}
-                                onClick={() => saveGuestAllotment(g)}
-                              >
-                                Save allotment
-                              </button>
-                            </div>
                           </div>
                         </td>
                       </tr>
