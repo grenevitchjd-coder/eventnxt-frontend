@@ -21,7 +21,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
 
   // ---- Guest types (accordion) ----
-  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite' })
+  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '' })
   const [creatingType, setCreatingType] = useState(false)
   const [editingTypeId, setEditingTypeId] = useState(null)
   const [typeEditForm, setTypeEditForm] = useState({ name: '', guest_mode: '' })
@@ -68,9 +68,15 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     e.preventDefault()
     setCreatingType(true)
     try {
-      await api.createGuestType(loadedEventId, { name: typeForm.name, guest_mode: typeForm.guest_mode || null })
+      await api.createGuestType(loadedEventId, {
+        name: typeForm.name,
+        guest_mode: typeForm.guest_mode || null,
+        day_scope: typeForm.day_scope || null,
+        default_ticket_count: parseInt(typeForm.default_ticket_count, 10) || null,
+        default_hold_timing: typeForm.default_hold_timing || null,
+      })
       onToast(`"${typeForm.name}" added`)
-      setTypeForm({ name: '', guest_mode: 'invite' })
+      setTypeForm({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '' })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -81,13 +87,19 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
   const startEditType = (type) => {
     setEditingTypeId(type.id)
-    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '' })
+    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '', day_scope: type.day_scope || '', default_ticket_count: type.default_ticket_count || '', default_hold_timing: type.default_hold_timing || '' })
   }
 
   const saveEditType = async (typeId) => {
     setSavingType(true)
     try {
-      await api.updateGuestType(loadedEventId, typeId, { name: typeEditForm.name, guest_mode: typeEditForm.guest_mode || null })
+      await api.updateGuestType(loadedEventId, typeId, {
+        name: typeEditForm.name,
+        guest_mode: typeEditForm.guest_mode || null,
+        day_scope: typeEditForm.day_scope || null,
+        default_ticket_count: parseInt(typeEditForm.default_ticket_count, 10) || null,
+        default_hold_timing: typeEditForm.default_hold_timing || null,
+      })
       onToast('Saved')
       setEditingTypeId(null)
       loadEventData(loadedEventId)
@@ -250,7 +262,48 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                   <option value="invite">Guest invite — RSVPs for themselves (Invites page)</option>
                   <option value="select">Guest invite — picks their own days (Invites page)</option>
                   <option value="distribute">Allotment — hands tickets out to their people (Allotments page)</option>
-                  <option value="">Auto (legacy) — allotment if budgeted, else invite</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="type-scope" title="The SHAPE of the offer — actual dates are chosen per guest, so one type covers a Thu-only and a Fri-only offer">
+                  Days offered
+                </label>
+                <select
+                  id="type-scope"
+                  value={typeForm.day_scope}
+                  onChange={(e) => setTypeForm({ ...typeForm, day_scope: e.target.value })}
+                >
+                  <option value="">Set per guest (no default)</option>
+                  <option value="single">Single day — picked per guest</option>
+                  <option value="specific">Specific days — set per guest</option>
+                  <option value="choose">Guest chooses — spends a total across days</option>
+                  <option value="all">All days — every event day, follows date changes</option>
+                </select>
+              </div>
+              <div className="field" style={{ width: 110 }}>
+                <label htmlFor="type-count">Tickets</label>
+                <input
+                  id="type-count"
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 2"
+                  value={typeForm.default_ticket_count}
+                  onChange={(e) => setTypeForm({ ...typeForm, default_ticket_count: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="type-hold" title="Default for new guests of this type — when their tickets are pulled from sellable inventory">
+                  Pull from inventory
+                </label>
+                <select
+                  id="type-hold"
+                  value={typeForm.default_hold_timing}
+                  onChange={(e) => setTypeForm({ ...typeForm, default_hold_timing: e.target.value })}
+                >
+                  <option value="">Now (default)</option>
+                  <option value="now">Now — held the moment it's sent</option>
+                  <option value="on_confirm">On RSVP yes</option>
+                  <option value="later">Later — no hold yet</option>
                 </select>
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
@@ -294,7 +347,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               <option value="invite">Guest invite — RSVPs for themselves</option>
                               <option value="select">Guest invite — picks their own days</option>
                               <option value="distribute">Allotment — hands tickets out</option>
-                              <option value="">Auto (legacy)</option>
+                              {typeEditForm.guest_mode === '' && <option value="">Auto (legacy — retired)</option>}
                             </select>
                         </td>
                         <td className="actions-cell">
