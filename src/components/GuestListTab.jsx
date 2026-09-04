@@ -139,7 +139,7 @@ export default function GuestListTab({ onToast, eventId }) {
       if (res.result === 'admitted') onToast(`${g.name} checked in — ${t.code}`)
       else if (res.result === 'already_checked_in') onToast(`${t.code} was already checked in`, true)
       else if (res.result === 'wrong_day') onToast(`${t.code} is for ${fmtDay(t.valid_date)} — not admitted today`, true)
-      else if (res.result === 'refunded') onToast(`${t.code} is cancelled — do not admit`, true)
+      else if (res.result === 'refunded') onToast(`${t.code} is ${res.refund_word || 'cancelled'} — do not admit`, true)
       else onToast(`${t.code}: ${res.result}`, true)
       load(loadedEventId)
     } catch (err) {
@@ -328,7 +328,7 @@ export default function GuestListTab({ onToast, eventId }) {
                                   {t.checked_in_at ? (
                                     <div style={{ color: 'var(--success)', fontWeight: 600, marginTop: 4 }}>✓ checked in</div>
                                   ) : t.status === 'refunded' ? (
-                                    <div className="pill pill-declined" style={{ marginTop: 4 }}>do not admit</div>
+                                    <div className="pill pill-declined" style={{ marginTop: 4 }}>cancelled — do not admit</div>
                                   ) : (
                                     <button
                                       className="btn btn-primary btn-sm"

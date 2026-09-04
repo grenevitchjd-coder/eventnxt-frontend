@@ -120,6 +120,50 @@ export default function SalesReferralsTab({ onToast, eventId }) {
   // ---------- Promo codes ----------
 
   const [codeForm, setCodeForm] = useState({ guest_id: '', code: '', reward_type: 'flat_amount', reward_value: '', discount_type: '', discount_value: '' })
+  // ---- Promo edit view: per-row form covering everything the PATCH
+  // supports — code text, reward, buyer discount, message draft.
+  const [editingCodeId, setEditingCodeId] = useState(null)
+  const [codeEditForm, setCodeEditForm] = useState(null)
+  const [savingCodeEdit, setSavingCodeEdit] = useState(false)
+
+  const startEditCode = (code) => {
+    setEditingCodeId(code.id)
+    setCodeEditForm({
+      code: code.code,
+      reward_type: code.reward_type,
+      reward_value: code.reward_value != null ? String(code.reward_value) : '',
+      discount_type: code.discount_type || '',
+      discount_value: code.discount_value != null ? String(code.discount_value) : '',
+      referral_message_draft: code.referral_message_draft || '',
+    })
+  }
+
+  const saveEditCode = async (code) => {
+    setSavingCodeEdit(true)
+    try {
+      const payload = {
+        code: codeEditForm.code.trim(),
+        reward_type: codeEditForm.reward_type,
+        referral_message_draft: codeEditForm.referral_message_draft || null,
+        // PATCH full-replaces: points rates must ride along untouched.
+        points_rates: code.points_rates || [],
+        discount_type: codeEditForm.discount_type || null,
+        discount_value:
+          codeEditForm.discount_type && codeEditForm.discount_value !== '' ? Number(codeEditForm.discount_value) : null,
+      }
+      if (codeEditForm.reward_type !== 'points') {
+        payload.reward_value = codeEditForm.reward_value === '' ? null : Number(codeEditForm.reward_value)
+      }
+      await api.updatePromoCode(loadedEventId, code.id, payload)
+      onToast(`"${payload.code}" updated`)
+      setEditingCodeId(null)
+      loadAll(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingCodeEdit(false)
+    }
+  }
   const [eventSlug, setEventSlug] = useState(null) // public slug, for building influencer links
 
   useEffect(() => {
@@ -667,11 +711,103 @@ export default function SalesReferralsTab({ onToast, eventId }) {
                           : '—'}
                       </td>
                       <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => (editingCodeId === code.id ? setEditingCodeId(null) : startEditCode(code))}>
+                          {editingCodeId === code.id ? 'Cancel' : 'Edit'}
+                        </button>
                         <button className="btn btn-danger btn-sm" onClick={() => deleteCode(code)}>
                           Delete
                         </button>
                       </td>
                     </tr>
+                    {editingCodeId === code.id && codeEditForm && (
+                      <tr>
+                        <td></td>
+                        <td colSpan={6} style={{ background: 'var(--surface-alt)', paddingTop: 10, paddingBottom: 14 }}>
+                          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                            <div className="field" style={{ width: 140 }}>
+                              <label>Code</label>
+                              <input
+                                value={codeEditForm.code}
+                                onChange={(e) => setCodeEditForm({ ...codeEditForm, code: e.target.value })}
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Reward</label>
+                              <select
+                                value={codeEditForm.reward_type}
+                                onChange={(e) => setCodeEditForm({ ...codeEditForm, reward_type: e.target.value })}
+                              >
+                                <option value="flat_amount">Flat $ per sale</option>
+                                <option value="percentage">% of sale</option>
+                                <option value="free_tickets">Free tickets</option>
+                                <option value="points">Points</option>
+                              </select>
+                            </div>
+                            {codeEditForm.reward_type !== 'points' && (
+                              <div className="field" style={{ width: 110 }}>
+                                <label>
+                                  {codeEditForm.reward_type === 'percentage'
+                                    ? '% per sale'
+                                    : codeEditForm.reward_type === 'free_tickets'
+                                      ? 'Tickets'
+                                      : '$ per sale'}
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  value={codeEditForm.reward_value}
+                                  onChange={(e) => setCodeEditForm({ ...codeEditForm, reward_value: e.target.value })}
+                                />
+                              </div>
+                            )}
+                            <div className="field">
+                              <label title="What the BUYER saves when they use this code at checkout">Buyer discount</label>
+                              <select
+                                value={codeEditForm.discount_type}
+                                onChange={(e) =>
+                                  setCodeEditForm({
+                                    ...codeEditForm,
+                                    discount_type: e.target.value,
+                                    discount_value: e.target.value ? codeEditForm.discount_value : '',
+                                  })
+                                }
+                              >
+                                <option value="">None</option>
+                                <option value="percentage">% off</option>
+                                <option value="flat_amount">$ off</option>
+                              </select>
+                            </div>
+                            {codeEditForm.discount_type && (
+                              <div className="field" style={{ width: 100 }}>
+                                <label>{codeEditForm.discount_type === 'percentage' ? '% off' : '$ off'}</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  value={codeEditForm.discount_value}
+                                  onChange={(e) => setCodeEditForm({ ...codeEditForm, discount_value: e.target.value })}
+                                />
+                              </div>
+                            )}
+                            <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                              <label title="Prefilled share text for this influencer">Share message</label>
+                              <input
+                                value={codeEditForm.referral_message_draft}
+                                onChange={(e) => setCodeEditForm({ ...codeEditForm, referral_message_draft: e.target.value })}
+                              />
+                            </div>
+                            <button className="btn btn-primary btn-sm" disabled={savingCodeEdit} onClick={() => saveEditCode(code)}>
+                              {savingCodeEdit ? 'Saving…' : 'Save'}
+                            </button>
+                          </div>
+                          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                            Renaming a code keeps its sales history; the old spelling stops working for new buyers.
+                            Points rates are edited in the expanded view below.
+                          </p>
+                        </td>
+                      </tr>
+                    )}
                     {expandedCodeId === code.id && (
                       <tr>
                         <td></td>

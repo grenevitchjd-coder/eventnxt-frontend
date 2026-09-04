@@ -24,7 +24,7 @@ const RESULT_STYLES = {
   admitted: { bg: '#E1F5EE', border: '#0F6E56', label: 'ADMIT' },
   wrong_day: { bg: '#FDEBD7', border: '#B4590A', label: 'WRONG DAY — DO NOT ADMIT' },
   already_checked_in: { bg: '#FBF3DC', border: '#8A6D1C', label: 'ALREADY CHECKED IN' },
-  refunded: { bg: '#FAE4E4', border: '#A33', label: 'REFUNDED — DO NOT ADMIT' },
+  refunded: { bg: '#FAE4E4', border: '#A33', label: 'DO NOT ADMIT' },
   not_found: { bg: '#FAE4E4', border: '#A33', label: 'NOT A TICKET FOR THIS EVENT' },
 }
 
@@ -165,7 +165,11 @@ export default function ScanPage() {
       {/* Result card — the thing the person at the door actually reads */}
       {result && style && (
         <div style={{ background: style.bg, border: `2px solid ${style.border}`, color: '#222', borderRadius: 12, padding: '14px 16px', marginBottom: 14 }}>
-          <div style={{ fontWeight: 800, letterSpacing: 0.5, color: style.border }}>{style.label}</div>
+          <div style={{ fontWeight: 800, letterSpacing: 0.5, color: style.border }}>
+            {result.result === 'refunded'
+              ? `${(result.refund_word || 'refunded').toUpperCase()} — DO NOT ADMIT`
+              : style.label}
+          </div>
           {result.name && (
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{result.name}</div>
           )}
