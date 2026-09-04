@@ -31,6 +31,9 @@ const HEADER_ALIASES = {
   category: 'seatingCategory',
   status: 'status',
   allocationstatus: 'status',
+  tickets: 'partySize',
+  party: 'partySize',
+  partysize: 'partySize',
 }
 
 const normalizeHeader = (h) => (h || '').toString().toLowerCase().replace(/[^a-z]/g, '')
@@ -52,7 +55,10 @@ function rowsFromParsedRecords(records) {
       email: mapped.email || '',
       guestTypeText: mapped.guestType || '',
       seatingCategoryText: mapped.seatingCategory || '',
-      statusText: (mapped.status || 'confirmed').toLowerCase(),
+      partySizeText: mapped.partySize || '',
+      // Pending by default — confirmation comes from the RSVP, never
+      // from the act of importing (mints happen on yes).
+      statusText: (mapped.status || 'pending').toLowerCase(),
     }
   })
 }
@@ -91,6 +97,7 @@ export default function InvitesTab({ onToast, eventId }) {
   const [allotmentDraftRows, setAllotmentDraftRows] = useState([]) // [{date, quantity}]
   const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
   const [savingGuestAllotment, setSavingGuestAllotment] = useState(false)
+  const [spendTotalDraft, setSpendTotalDraft] = useState('')
 
   // Reserved-seat assignment (guests in an assigned-seating area)
   const [seatsGuestId, setSeatsGuestId] = useState(null)
@@ -352,6 +359,7 @@ export default function InvitesTab({ onToast, eventId }) {
   // ---------- Per-guest ticket allotment override panel ----------
 
   const toggleAllotmentPanel = (guest) => {
+    setSpendTotalDraft(guest.spend_total ? String(guest.spend_total) : '')
     if (expandedAllotmentGuestId === guest.id) {
       setExpandedAllotmentGuestId(null)
       return
@@ -393,6 +401,7 @@ export default function InvitesTab({ onToast, eventId }) {
         guest_mode: guest.guest_mode ?? null,
         hold_timing: guest.hold_timing || 'now',
         ticket_allotment: allotmentDraftRows,
+        spend_total: parseInt(spendTotalDraft, 10) || null,
       })
       onToast('Ticket allotment saved')
       loadEventData(loadedEventId)
@@ -586,6 +595,7 @@ export default function InvitesTab({ onToast, eventId }) {
           guest_type_id: updated[i].guest_type_id,
           seating_category_id: updated[i].seating_category_id || null,
           allocation_status: updated[i].allocation_status,
+          party_size: parseInt(updated[i].partySizeText, 10) || 1,
         })
         updated[i] = { ...updated[i], importStatus: 'success', importError: null }
         succeeded++
@@ -697,6 +707,37 @@ export default function InvitesTab({ onToast, eventId }) {
       byKey[key].seats.push(s)
     }
     return groups
+  }
+
+  // Email one invitee their RSVP link (offer summary included) and
+  // stamp the sent marker — the single-guest form of "Email all unsent".
+  const emailInvite = async (guest) => {
+    try {
+      await api.sendGuestInvite(loadedEventId, guest.id)
+      onToast(`Invite emailed to ${guest.name}`)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
+  const [bulkEmailing, setBulkEmailing] = useState(false)
+  const emailAllUnsent = async () => {
+    setBulkEmailing(true)
+    try {
+      const res = await api.sendGuestInvitesBulk(loadedEventId)
+      onToast(
+        res.sent === 0 && res.failed === 0
+          ? 'Everyone already has their invite'
+          : `Emailed ${res.sent} invite${res.sent === 1 ? '' : 's'}${res.failed ? ` — ${res.failed} failed (check email settings)` : ''}`,
+        res.failed > 0
+      )
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setBulkEmailing(false)
+    }
   }
 
   const copyRsvpLink = async (guest) => {
@@ -1221,6 +1262,9 @@ export default function InvitesTab({ onToast, eventId }) {
                   {externalTicketing && <option value="tickets_not_sent">Tickets not sent</option>}
                 </select>
               </div>
+              <button className="btn btn-secondary" disabled={bulkEmailing} onClick={emailAllUnsent} title="Emails every invitee without a sent stamp their RSVP link">
+                {bulkEmailing ? 'Emailing…' : 'Email all unsent'}
+              </button>
               <button className="btn btn-secondary" onClick={handleExportGuests}>
                 Download CSV
               </button>
@@ -1404,6 +1448,9 @@ export default function InvitesTab({ onToast, eventId }) {
                             <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
                               Copy
                             </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => emailInvite(g)} title="Email this guest their RSVP link now">
+                              Email
+                            </button>
                           </div>
                         </td>
                         <td className="actions-cell">
@@ -1504,6 +1551,9 @@ export default function InvitesTab({ onToast, eventId }) {
                             </a>
                             <button className="btn btn-secondary btn-sm" onClick={() => copyRsvpLink(g)}>
                               Copy
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => emailInvite(g)} title="Email this guest their RSVP link now">
+                              Email
                             </button>
                           </div>
                         </td>
@@ -1696,6 +1746,22 @@ export default function InvitesTab({ onToast, eventId }) {
                               <button className="btn btn-secondary btn-sm" onClick={addAllotmentDraftRow}>
                                 Add day
                               </button>
+                              <div className="field" style={{ width: 150 }}>
+                                <label
+                                  htmlFor={`spend-${g.id}`}
+                                  title="Set this LOWER than the day amounts to let the guest choose where to spend — e.g. 3 total across 2 Thu / 2 Sat. Blank = fixed offer."
+                                >
+                                  Total they can take
+                                </label>
+                                <input
+                                  id={`spend-${g.id}`}
+                                  type="number"
+                                  min={1}
+                                  placeholder="blank = all"
+                                  value={spendTotalDraft}
+                                  onChange={(e) => setSpendTotalDraft(e.target.value)}
+                                />
+                              </div>
                               <button
                                 className="btn btn-secondary btn-sm"
                                 disabled={savingGuestAllotment}

@@ -182,6 +182,16 @@ export const api = {
     }),
   getDoorRoster: (eventId) => request(`/events/${eventId}/guests/roster/door`),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
+  sendGuestInvite: (eventId, guestId) =>
+    request(`/events/${eventId}/guests/${guestId}/send-invite`, {
+      method: 'POST',
+      body: JSON.stringify({ rsvp_base_url: window.location.origin }),
+    }),
+  sendGuestInvitesBulk: (eventId) =>
+    request(`/events/${eventId}/guests/send-invites`, {
+      method: 'POST',
+      body: JSON.stringify({ rsvp_base_url: window.location.origin }),
+    }),
   removeGuestWithNotice: (eventId, guestId, note) =>
     request(`/events/${eventId}/guests/${guestId}/remove`, {
       method: 'POST',

@@ -1,3 +1,4 @@
+// eventnxt-frontend: src/pages/PublicRSVPPage.jsx
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
@@ -39,7 +40,7 @@ export default function PublicRSVPPage() {
   useEffect(() => {
     if (info && info.day_grants && Object.keys(dayQty).length === 0) {
       const seed = {}
-      for (const g of info.day_grants) seed[g.date] = info.effective_mode === 'select' ? 0 : g.quantity
+      for (const g of info.day_grants) seed[g.date] = chooser(info) ? 0 : g.quantity
       setDayQty(seed)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -47,7 +48,11 @@ export default function PublicRSVPPage() {
 
   const gridActive = Boolean(info?.day_grants?.length)
   const gridTotal = Object.values(dayQty).reduce((a, b) => a + (Number(b) || 0), 0)
-  const selectBudget = info?.effective_mode === 'select' ? info?.party_size || 1 : null
+  // Choose-within-caps is data now (0039): the server says when the
+  // guest's total is under the sum of their day grants. Legacy 'select'
+  // payloads without the flag keep working via the fallback.
+  const chooser = (i) => (i ? (i.choose_within_caps ?? i.effective_mode === 'select') : false)
+  const selectBudget = chooser(info) ? info?.spend_total ?? info?.party_size ?? 1 : null
 
   const handleRespond = async (attending) => {
     setSubmitting(true)
@@ -59,7 +64,7 @@ export default function PublicRSVPPage() {
         body: JSON.stringify(
           attending && gridActive
             ? { attending, day_quantities: Object.fromEntries(Object.entries(dayQty).map(([d, q]) => [d, Number(q) || 0])) }
-            : attending && info?.effective_mode === 'select' && selectedDay
+            : attending && chooser(info) && selectedDay
               ? { attending, visit_date: selectedDay }
               : { attending }
         ),
@@ -300,12 +305,12 @@ export default function PublicRSVPPage() {
           {info.allocation_status === 'pending' && !info.needs_seating && gridActive && (
             <div className="panel" style={{ textAlign: 'left', marginBottom: 16 }}>
               <p style={{ marginTop: 0, marginBottom: 4, fontWeight: 600 }}>
-                {info.effective_mode === 'select'
+                {chooser(info)
                   ? `You have ${selectBudget} ticket${selectBudget === 1 ? '' : 's'} — place them on the days you want`
                   : 'Your tickets, day by day'}
               </p>
               <p style={{ marginTop: 0, marginBottom: 10, fontSize: 13, color: 'var(--text-muted)' }}>
-                {info.effective_mode === 'select'
+                {chooser(info)
                   ? 'Any combination works, up to your total.'
                   : 'Take them all, or turn any day down — need extras? Ask below.'}
               </p>
@@ -324,12 +329,12 @@ export default function PublicRSVPPage() {
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 46 }}>of {g.quantity}</span>
                 </div>
               ))}
-              {info.effective_mode === 'select' && (
+              {chooser(info) && (
                 <p style={{ margin: '8px 0 0', fontSize: 13, fontWeight: gridTotal > selectBudget ? 700 : 400, color: gridTotal > selectBudget ? '#A33' : 'var(--text-muted)' }}>
                   {gridTotal} of {selectBudget} placed
                 </p>
               )}
-              {info.effective_mode !== 'select' && (
+              {!chooser(info) && (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -345,7 +350,7 @@ export default function PublicRSVPPage() {
               )}
             </div>
           )}
-          {info.allocation_status === 'pending' && !info.needs_seating && !gridActive && info.effective_mode === 'select' && (info.available_days || []).length > 0 && (
+          {info.allocation_status === 'pending' && !info.needs_seating && !gridActive && chooser(info) && (info.available_days || []).length > 0 && (
             <div className="panel" style={{ textAlign: 'left', marginBottom: 16 }}>
               <p style={{ marginTop: 0, marginBottom: 10, fontWeight: 600 }}>Which day works for you?</p>
               {(info.available_days || []).map((d) => (
@@ -364,7 +369,7 @@ export default function PublicRSVPPage() {
                   submitting ||
                   (gridActive
                     ? gridTotal < 1 || (selectBudget != null && gridTotal > selectBudget)
-                    : info.effective_mode === 'select' && (info.available_days || []).length > 0 && !selectedDay)
+                    : chooser(info) && (info.available_days || []).length > 0 && !selectedDay)
                 }
                 onClick={() => handleRespond(true)}
               >
