@@ -97,6 +97,7 @@ export const api = {
     request(`/events/${eventId}/guest-types/${guestTypeId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteGuestType: (eventId, guestTypeId) =>
     request(`/events/${eventId}/guest-types/${guestTypeId}`, { method: 'DELETE' }),
+  listLabeledHolds: (eventId) => request(`/events/${eventId}/seating-categories/holds/labeled`),
   listSeatingPriorities: (eventId, guestTypeId) =>
     request(`/events/${eventId}/guest-types/${guestTypeId}/seating-priorities`),
   addSeatingPriority: (eventId, guestTypeId, payload) =>

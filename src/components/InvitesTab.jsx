@@ -104,6 +104,9 @@ export default function InvitesTab({ onToast, eventId }) {
   const [guestSeatSel, setGuestSeatSel] = useState([])
   const [savingGuestSeats, setSavingGuestSeats] = useState(false)
   const [guestEventSettings, setGuestEventSettings] = useState(null)
+  // Labeled reserved-seat holds across the event ("Carey Grant × 2 in
+  // Row 1 Front") — used to wave a flag on matching guests' rows.
+  const [labeledHolds, setLabeledHolds] = useState([])
   const guestEventDays = (() => {
     const s = guestEventSettings
     if (!s || !s.first_day || !s.last_day || !['per_day', 'mixed', 'multi_day'].includes(s.ticket_span)) return []
@@ -147,7 +150,8 @@ export default function InvitesTab({ onToast, eventId }) {
         setCategories(cats)
         setGuests(gsts)
         setGuestTypes(types)
-        setLoadedEventId(id)
+        api.listLabeledHolds(id).then(setLabeledHolds).catch(() => setLabeledHolds([]))
+      setLoadedEventId(id)
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
@@ -623,6 +627,36 @@ export default function InvitesTab({ onToast, eventId }) {
     if (s.guest_id === g.id) return true // theirs — can deselect to release
     if (s.guest_id) return false // another guest's
     return s.status === 'available' || s.status === 'reserved'
+  }
+
+  const holdsForGuest = (g) => {
+    const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const n = norm(g.name)
+    if (!n) return []
+    return labeledHolds.filter((h) => {
+      const l = norm(h.block_label)
+      return l && (l === n || l.includes(n) || n.includes(l))
+    })
+  }
+
+  // "★ 2 reserved seats waiting" → point the guest at that pool (saved
+  // immediately) and open the picker, where the claim strip takes over.
+  const jumpToHold = async (g, hold) => {
+    try {
+      if (g.seating_category_id !== hold.seating_category_id) {
+        const updated = await api.updateGuest(loadedEventId, g.id, {
+          ...buildGridPayload(g),
+          seating_category_id: hold.seating_category_id,
+          section_label: null,
+        })
+        setGuests((prev) => prev.map((x) => (x.id === g.id ? updated : x)))
+        openGuestSeats(updated)
+      } else {
+        openGuestSeats(g)
+      }
+    } catch (err) {
+      onToast(err.message, true)
+    }
   }
 
   const toggleGuestSeat = (g, s) => {
@@ -1144,6 +1178,22 @@ export default function InvitesTab({ onToast, eventId }) {
                               needs seating
                             </span>
                           )}
+                          {holdsForGuest(g).map((h) => (
+                            <button
+                              key={h.seating_category_id + h.block_label}
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={() => jumpToHold(g, h)}
+                              title={`Seats are reserved under "${h.block_label}" in ${h.pool_name} — click to open the picker and claim them`}
+                              style={{
+                                display: 'block', marginTop: 4, padding: '2px 8px', fontSize: 11,
+                                border: '1px dashed var(--success)', color: 'var(--success)',
+                                background: 'transparent', borderRadius: 6, cursor: 'pointer',
+                              }}
+                            >
+                              ★ {h.count} reserved seat{h.count === 1 ? '' : 's'} in {h.pool_name}
+                            </button>
+                          ))}
                           {(g.perks || g.comments) && (
                             <span
                               title={[g.perks && `Perks: ${g.perks}`, g.comments && `Comments: ${g.comments}`]
@@ -1361,6 +1411,36 @@ export default function InvitesTab({ onToast, eventId }) {
                               </p>
                             ) : (
                               <>
+                                {(() => {
+                                  const blocks = {}
+                                  for (const seat of guestSeatMap) {
+                                    if (seat.is_blocked !== false && seat.block_label && (!seat.guest_id || seat.guest_id === g.id) && seat.status !== 'sold') {
+                                      ;(blocks[seat.block_label] = blocks[seat.block_label] || []).push(seat.id)
+                                    }
+                                  }
+                                  const names = Object.keys(blocks)
+                                  if (names.length === 0) return null
+                                  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]/g, '')
+                                  const mine = names.filter((n) => norm(n).includes(norm(g.name)) || norm(g.name).includes(norm(n)))
+                                  const order = [...mine, ...names.filter((n) => !mine.includes(n))]
+                                  return (
+                                    <div style={{ marginBottom: 10, fontSize: 12 }}>
+                                      <span style={{ color: 'var(--text-muted)' }}>Reserved blocks here — click to select for {g.name}: </span>
+                                      {order.map((n) => (
+                                        <button
+                                          key={n}
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          style={{ marginRight: 4, marginBottom: 4, ...(mine.includes(n) ? { borderColor: 'var(--success)', color: 'var(--success)', fontWeight: 600 } : {}) }}
+                                          title={mine.includes(n) ? `Label matches ${g.name} — these look like their seats` : `Select the ${blocks[n].length} seat(s) reserved under "${n}"`}
+                                          onClick={() => setGuestSeatSel((prev) => [...new Set([...prev, ...blocks[n]])])}
+                                        >
+                                          {n} × {blocks[n].length}{mine.includes(n) ? ' ★' : ''}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )
+                                })()}
                                 {guestSeatGroups(guestSeatMap).map((grp) => (
                                   <div key={`${grp.section_label}|${grp.row_label}`} style={{ marginBottom: 10 }}>
                                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
