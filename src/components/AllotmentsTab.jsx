@@ -1,55 +1,74 @@
 // eventnxt-frontend: src/components/AllotmentsTab.jsx
 //
-// Allotments — the second of the two ticket-offering surfaces. An
-// allotment belongs to an ENTITY (sponsor, model agency, volunteer
-// coordinator): a per-day budget of tickets that are theirs to hand
-// out. The entity gets the distribution portal (their RSVP link),
-// types in names/emails/days against a live remaining counter, and
-// each recipient becomes a guest row nested under them here, with
-// their own confirm link and answer. Placement is automatic (cohort
-// rules — same-allocation same-day recipients sit together unless
-// spread); hand-assigning individual seats is deliberately not a
-// thing on this page.
+// Allotments — the second ticket-offering surface, now the same
+// two-part shape as Invites:
+//   TOP: quick add (or CSV import) — entity name, email, guest type.
+//   BOTTOM: the budget grid — one row per allotment, day-budget
+//   columns + a TOTAL cap (set it lower than the day amounts and the
+//   sponsor can spend, say, 25 across 10/10/10 — the portal enforces
+//   it), placement toggle, seating visibility (where the type's
+//   priorities will put recipients — automation still places, this is
+//   just the plan made visible), recipients nested under each row.
+//   Nothing is emailed until "Save & send portal links".
 //
-// Direct invites (celebrities, press — people who answer for
-// themselves) live on the Invites page; the flat door roster is the
-// Guest list page.
-import { Fragment, useEffect, useState } from 'react'
+// Direct invitees live on Invites; the door roster is Guest list.
+import { Fragment, useEffect, useRef, useState } from 'react'
+import Papa from 'papaparse'
 import { api } from '../api'
 
 const rsvpUrl = (token) => `${window.location.origin}/rsvp/${token}`
-
-const EMPTY_FORM = {
-  name: '',
-  email: '',
-  guest_type_id: '',
-  cohort_together: true,
-}
+const selectStyle = { fontSize: 12.5, padding: '4px 6px', width: '100%' }
 
 export default function AllotmentsTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
   const [guests, setGuests] = useState(null)
   const [guestTypes, setGuestTypes] = useState([])
+  const [categories, setCategories] = useState([])
   const [settings, setSettings] = useState(null)
+  const [prioritiesByType, setPrioritiesByType] = useState({})
 
-  const [form, setForm] = useState(EMPTY_FORM)
-  const [budgetRows, setBudgetRows] = useState([]) // [{date, quantity}] — date '' = whole event
-  const [budgetDraft, setBudgetDraft] = useState({ date: '', quantity: '' })
+  const [form, setForm] = useState({ name: '', email: '', guest_type_id: '' })
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
   const [busyId, setBusyId] = useState(null)
 
+  // Grid edits per distributor: guest_type_id, spend_total, day:<iso>
+  // (or day: for the undated "any day" budget on single-day events).
+  const [gridEdits, setGridEdits] = useState({})
+  const [savingGrid, setSavingGrid] = useState(false)
+  const [committing, setCommitting] = useState(false)
+
+  const fileInputRef = useRef(null)
+  const [importing, setImporting] = useState(false)
+
   const loadEventData = async (evId) => {
     try {
-      const [g, gt, st] = await Promise.all([
+      const [g, gt, st, cats] = await Promise.all([
         api.listGuests(evId),
         api.listGuestTypes(evId),
         api.getEventSettings(evId),
+        api.listSeatingCategories(evId),
       ])
       setGuests(g)
       setGuestTypes(gt)
       setSettings(st)
+      setCategories(cats)
       setLoadedEventId(evId)
+      // Seating visibility: pull each allotment type's priority list once
+      // (best-effort — the grid just shows a warning when unavailable).
+      const typeIds = [...new Set(
+        g.filter((x) => !x.allocated_by_guest_id && (x.effective_mode || 'invite') === 'distribute').map((x) => x.guest_type_id)
+      )]
+      const entries = await Promise.all(
+        typeIds.map(async (id) => {
+          try {
+            return [id, await api.listSeatingPriorities(evId, id)]
+          } catch {
+            return [id, []]
+          }
+        })
+      )
+      setPrioritiesByType(Object.fromEntries(entries))
     } catch (err) {
       onToast(err.message, true)
     }
@@ -74,33 +93,126 @@ export default function AllotmentsTab({ onToast, eventId }) {
     }
     return out
   })()
+  const budgetCols = eventDays.length > 0 ? eventDays : [''] // '' = any-day budget
   const fmtDay = (iso) =>
-    iso ? new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : 'Any day'
+    iso ? new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : 'Budget'
 
   const distributors = (guests || []).filter(
     (g) => !g.allocated_by_guest_id && (g.effective_mode || 'invite') === 'distribute'
   )
   const recipientsOf = (id) => (guests || []).filter((g) => g.allocated_by_guest_id === id)
-  const typeName = (id) => (guestTypes.find((t) => t.id === id) || {}).name || '—'
 
-  // ---------- Create an allotment ----------
+  // ---------- Grid editing ----------
 
-  const addBudgetRow = () => {
-    const qty = parseInt(budgetDraft.quantity, 10)
-    if (!qty || qty < 1) return
-    setBudgetRows((prev) => [
-      ...prev.filter((r) => r.date !== budgetDraft.date),
-      { date: budgetDraft.date, quantity: qty },
-    ])
-    setBudgetDraft({ date: '', quantity: '' })
+  const dayRowsOf = (g) => Object.fromEntries((g.ticket_allotment || []).map((r) => [r.date || '', r.quantity]))
+
+  const gridVal = (g, field) => {
+    const e = gridEdits[g.id]
+    if (e && field in e) return e[field]
+    if (field.startsWith('day:')) {
+      const v = dayRowsOf(g)[field.slice(4)]
+      return v === undefined ? '' : String(v)
+    }
+    if (field === 'spend_total') return g.spend_total ? String(g.spend_total) : ''
+    return g[field] ?? ''
   }
+
+  const setGridVal = (g, field, value) =>
+    setGridEdits((prev) => ({ ...prev, [g.id]: { ...(prev[g.id] || {}), [field]: value } }))
+
+  const dirtyIds = Object.keys(gridEdits).filter((id) => Object.keys(gridEdits[id] || {}).length > 0)
+
+  // Where the type's priorities will place recipients — the PLAN, not a
+  // control. Automation still does the placing on confirm.
+  const seatingSummary = (g) => {
+    const prios = prioritiesByType[gridVal(g, 'guest_type_id') || g.guest_type_id] || []
+    if (prios.length === 0) return null
+    const first = prios[0]
+    const cat = categories.find((c) => c.id === first.seating_category_id)
+    if (!cat) return null
+    const secs = first.allowed_sections?.length
+      ? ` (Sec ${first.allowed_sections.join(', ')})`
+      : first.section_label
+        ? ` (Sec ${first.section_label})`
+        : ''
+    return `${cat.name}${secs}${prios.length > 1 ? ` +${prios.length - 1} more` : ''}`
+  }
+
+  const buildGridPayload = (g) => {
+    const e = gridEdits[g.id] || {}
+    const touchedDays = Object.keys(e).some((k) => k.startsWith('day:'))
+    let ticket_allotment = null
+    if (touchedDays) {
+      ticket_allotment = budgetCols
+        .map((d) => ({ date: d || null, quantity: parseInt(gridVal(g, `day:${d}`), 10) || 0 }))
+        .filter((r) => r.quantity > 0)
+    }
+    return {
+      name: g.name,
+      email: g.email,
+      guest_type_id: gridVal(g, 'guest_type_id') || g.guest_type_id,
+      seating_category_id: g.seating_category_id || null,
+      section_label: g.section_label || null,
+      visit_date: g.visit_date || null,
+      allocation_status: g.allocation_status,
+      party_size: g.party_size || 1,
+      perks: g.perks || null,
+      comments: g.comments || null,
+      guest_mode: g.guest_mode ?? 'distribute',
+      hold_timing: g.hold_timing || 'now',
+      spend_total: parseInt(gridVal(g, 'spend_total'), 10) || null,
+      cohort_together: g.cohort_together,
+      ...(ticket_allotment !== null ? { ticket_allotment } : {}),
+    }
+  }
+
+  const saveGrid = async () => {
+    if (dirtyIds.length === 0) return 0
+    setSavingGrid(true)
+    let saved = 0
+    try {
+      for (const id of dirtyIds) {
+        const g = (guests || []).find((x) => x.id === id)
+        if (!g) continue
+        await api.updateGuest(loadedEventId, id, buildGridPayload(g))
+        saved++
+      }
+      setGridEdits({})
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+      loadEventData(loadedEventId)
+    } finally {
+      setSavingGrid(false)
+    }
+    return saved
+  }
+
+  const saveAndSendPortalLinks = async () => {
+    setCommitting(true)
+    try {
+      const saved = await saveGrid()
+      const res = await api.sendPortalLinksBulk(loadedEventId)
+      const parts = []
+      if (saved) parts.push(`${saved} change${saved === 1 ? '' : 's'} saved`)
+      parts.push(
+        res.sent === 0 && res.failed === 0
+          ? 'every allotment already has its link'
+          : `${res.sent} portal link${res.sent === 1 ? '' : 's'} emailed${res.failed ? `, ${res.failed} failed` : ''}`
+      )
+      onToast(parts.join(' · '), res.failed > 0)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setCommitting(false)
+    }
+  }
+
+  // ---------- Quick add + CSV import ----------
 
   const handleCreate = async (e) => {
     e.preventDefault()
-    if (budgetRows.length === 0) {
-      onToast('Give the allotment a ticket budget first (add at least one row).', true)
-      return
-    }
     setCreating(true)
     try {
       const created = await api.createGuest(loadedEventId, {
@@ -112,18 +224,71 @@ export default function AllotmentsTab({ onToast, eventId }) {
         perks: null,
         comments: null,
         guest_mode: 'distribute',
-        cohort_together: form.cohort_together,
-        ticket_allotment: budgetRows.map((r) => ({ date: r.date || null, quantity: r.quantity })),
       })
-      onToast(`Allotment created for ${created.name} — send them their portal link so they can hand tickets out`)
-      setForm(EMPTY_FORM)
-      setBudgetRows([])
+      onToast(`${created.name} added — set their budget below, then Save & send portal links`)
+      setForm({ name: '', email: '', guest_type_id: form.guest_type_id })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
     } finally {
       setCreating(false)
     }
+  }
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (result) => {
+        let ok = 0
+        let bad = 0
+        for (const rec of result.data) {
+          const keys = Object.fromEntries(
+            Object.entries(rec).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ''), (v ?? '').toString().trim()])
+          )
+          const name = keys.name || keys.fullname || ''
+          const email = keys.email || keys.emailaddress || ''
+          const typeText = (keys.guesttype || keys.type || '').toLowerCase()
+          const gt =
+            guestTypes.find((t) => t.name.toLowerCase() === typeText) ||
+            guestTypes.find((t) => t.id === form.guest_type_id) ||
+            guestTypes[0]
+          if (!name || !email || !gt) {
+            bad++
+            continue
+          }
+          try {
+            await api.createGuest(loadedEventId, {
+              name,
+              email,
+              guest_type_id: gt.id,
+              allocation_status: 'confirmed',
+              party_size: 1,
+              perks: null,
+              comments: null,
+              guest_mode: 'distribute',
+            })
+            ok++
+          } catch {
+            bad++
+          }
+        }
+        setImporting(false)
+        e.target.value = ''
+        onToast(
+          `${ok} allotment${ok === 1 ? '' : 's'} imported${bad ? ` — ${bad} row${bad === 1 ? '' : 's'} skipped` : ''} — set budgets below, nothing emailed yet`,
+          bad > 0
+        )
+        loadEventData(loadedEventId)
+      },
+      error: () => {
+        setImporting(false)
+        onToast('Could not read that file', true)
+      },
+    })
   }
 
   // ---------- Row actions ----------
@@ -137,10 +302,26 @@ export default function AllotmentsTab({ onToast, eventId }) {
     }
   }
 
-  const toggleLinkSent = async (g) => {
+  const emailPortalLink = async (g) => {
     setBusyId(g.id)
     try {
-      await api.setGuestSentStatus(loadedEventId, g.id, !g.link_sent_at)
+      await api.sendGuestInvite(loadedEventId, g.id)
+      onToast(`Portal link emailed to ${g.name}`)
+      loadEventData(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const toggleCohort = async (g) => {
+    setBusyId(g.id)
+    try {
+      await api.updateGuest(loadedEventId, g.id, {
+        ...buildGridPayload(g),
+        cohort_together: !(g.cohort_together !== false),
+      })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -161,33 +342,11 @@ export default function AllotmentsTab({ onToast, eventId }) {
     }
   }
 
-  const toggleCohort = async (g) => {
-    setBusyId(g.id)
-    try {
-      await api.updateGuest(loadedEventId, g.id, {
-        name: g.name,
-        email: g.email,
-        guest_type_id: g.guest_type_id,
-        seating_category_id: g.seating_category_id || null,
-        section_label: g.section_label || null,
-        visit_date: g.visit_date || null,
-        allocation_status: g.allocation_status,
-        party_size: g.party_size || 1,
-        perks: g.perks || null,
-        comments: g.comments || null,
-        guest_mode: g.guest_mode ?? null,
-        hold_timing: g.hold_timing || 'now',
-        cohort_together: !(g.cohort_together !== false),
-      })
-      loadEventData(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const removeRecipient = async (g) => {
+    if (g.allocation_status === 'confirmed') {
+      onToast(`${g.name} is confirmed — remove them from the Guest list page, which cancels their tickets and emails them.`, true)
+      return
+    }
     if (!window.confirm(`Remove ${g.name}? Their budget goes back to the allotment.`)) return
     setBusyId(g.id)
     try {
@@ -222,180 +381,207 @@ export default function AllotmentsTab({ onToast, eventId }) {
 
   if (!loadedEventId || guests === null) return null
 
+  const colCount = 6 + budgetCols.length
+
   return (
     <>
       <div className="page-title">Allotments</div>
       <p className="page-subtitle">
-        Ticket budgets that belong to an entity — sponsors, model agencies, volunteer coordinators —
-        who hand them out to their own people through their portal link. Recipients appear nested
-        under each allotment as they&apos;re entered
-        {externalTicketing
-          ? '. This event sells externally: check availability on Tickets & seating, order the real tickets on your platform, and mark each recipient below once sent.'
-          : ', with tickets minted and placed automatically (same-day recipients from one allotment seat together unless set to spread).'}
-        {' '}Direct invites live on the Invites page.
+        Ticket budgets that belong to an entity — sponsors, agencies, coordinators — who hand them out
+        through their portal link; recipients appear nested under each row as they&apos;re entered.
+        Add the entity above, set the budget in the grid, then <strong>Save &amp; send portal links</strong> —
+        nothing is emailed until you do.
+        {externalTicketing &&
+          ' This event sells externally: order the real tickets on your platform and mark each recipient once sent.'}
       </p>
 
       <div className="panel">
-        <div className="panel-title">Create an allotment</div>
-        <form onSubmit={handleCreate}>
-          <div className="inline-form">
-            <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label htmlFor="al-name">Entity / contact name</label>
-              <input id="al-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 180 }}>
-              <label htmlFor="al-email">Email (gets the portal link)</label>
-              <input id="al-email" required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </div>
-            <div className="field">
-              <label htmlFor="al-type">Guest type</label>
-              <select id="al-type" value={form.guest_type_id} onChange={(e) => setForm({ ...form, guest_type_id: e.target.value })}>
-                {guestTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="al-cohort" title="Recipients from this allotment on the same day: one section side by side, or spread individually">
-                Seat recipients
-              </label>
-              <select
-                id="al-cohort"
-                value={form.cohort_together ? 'together' : 'spread'}
-                onChange={(e) => setForm({ ...form, cohort_together: e.target.value === 'together' })}
-              >
-                <option value="together">Together (same section)</option>
-                <option value="spread">Spread individually</option>
-              </select>
-            </div>
+        <div className="panel-title">Add allotments</div>
+        <form className="inline-form" onSubmit={handleCreate}>
+          <div className="field" style={{ flex: 1, minWidth: 160 }}>
+            <label htmlFor="al-name">Entity / contact name</label>
+            <input id="al-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
-
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-              Ticket budget — how many they can hand out{eventDays.length > 0 ? ', per day' : ''}
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              {eventDays.length > 0 ? (
-                <div className="field" style={{ width: 180 }}>
-                  <label>Day</label>
-                  <select value={budgetDraft.date} onChange={(e) => setBudgetDraft({ ...budgetDraft, date: e.target.value })}>
-                    <option value="">Any day</option>
-                    {eventDays.map((d) => (
-                      <option key={d} value={d}>
-                        {fmtDay(d)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-              <div className="field" style={{ width: 110 }}>
-                <label>Tickets</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={budgetDraft.quantity}
-                  onChange={(e) => setBudgetDraft({ ...budgetDraft, quantity: e.target.value })}
-                />
-              </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={addBudgetRow} style={{ marginBottom: 10 }}>
-                Add to budget
-              </button>
-              {budgetRows.map((r) => (
-                <span key={r.date || 'any'} className="pill pill-pending" style={{ marginBottom: 12 }}>
-                  {fmtDay(r.date)} × {r.quantity}
-                  <button
-                    type="button"
-                    aria-label="remove"
-                    onClick={() => setBudgetRows((prev) => prev.filter((x) => x.date !== r.date))}
-                    style={{ marginLeft: 6, border: 'none', background: 'none', cursor: 'pointer', color: 'inherit' }}
-                  >
-                    ×
-                  </button>
-                </span>
+          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+            <label htmlFor="al-email">Email (gets the portal link)</label>
+            <input id="al-email" required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="al-type">Guest type</label>
+            <select id="al-type" value={form.guest_type_id} onChange={(e) => setForm({ ...form, guest_type_id: e.target.value })}>
+              <option value="">Choose…</option>
+              {guestTypes.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
               ))}
-            </div>
+            </select>
           </div>
-
-          <button className="btn btn-secondary" type="submit" disabled={creating || guestTypes.length === 0} style={{ marginTop: 10 }}>
-            Create allotment
+          <button className="btn btn-secondary" type="submit" disabled={creating || guestTypes.length === 0}>
+            Add allotment
           </button>
-          {guestTypes.length === 0 && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 10 }}>
-              Create a guest type first (Guest types page).
-            </span>
-          )}
+          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} style={{ display: 'none' }} />
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={importing || guestTypes.length === 0}
+            onClick={() => fileInputRef.current?.click()}
+            title="CSV with name, email, and (optionally) guest type columns — budgets set in the grid after"
+          >
+            {importing ? 'Importing…' : 'Import CSV'}
+          </button>
         </form>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+          Budgets, totals, and placement are set in the grid below — the type&apos;s defaults apply until
+          you change them. People who RSVP for themselves belong on the Invites page.
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+          {distributors.length} allotment{distributors.length === 1 ? '' : 's'}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          className="btn btn-secondary"
+          disabled={savingGrid || committing || dirtyIds.length === 0}
+          onClick={async () => {
+            const n = await saveGrid()
+            if (n) onToast(`${n} change${n === 1 ? '' : 's'} saved — nothing emailed yet`)
+          }}
+          title="Save budget edits without emailing anyone"
+        >
+          {savingGrid && !committing ? 'Saving…' : `Save changes${dirtyIds.length ? ` (${dirtyIds.length})` : ''}`}
+        </button>
+        <button
+          className="btn btn-primary"
+          disabled={committing || savingGrid}
+          onClick={saveAndSendPortalLinks}
+          title="Save every edit, then email every allotment that hasn't received its portal link"
+        >
+          {committing ? 'Sending…' : 'Save & send portal links'}
+        </button>
       </div>
 
       <table className="data-table" style={{ marginBottom: 28 }}>
         <thead>
           <tr>
             <th>Allotment</th>
-            <th>Budget</th>
+            <th>Type</th>
+            {budgetCols.map((d) => (
+              <th key={d || 'any'} style={{ textAlign: 'center' }}>
+                {fmtDay(d)}
+              </th>
+            ))}
+            <th title="Set LOWER than the day budgets to cap the whole allotment — e.g. 25 across 10/10/10. The portal enforces it.">
+              Total
+            </th>
             <th>Given out</th>
-            <th>Portal link</th>
-            <th>Placement</th>
+            <th title="Where the type's seating priorities will place recipients (automatic), and whether same-day recipients sit together">
+              Seating
+            </th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {distributors.length === 0 ? (
             <tr>
-              <td colSpan={6} className="empty-state">
-                No allotments yet — create one above. Sponsors and agencies hand their own tickets out;
-                you just set the budget.
+              <td colSpan={colCount} className="empty-state">
+                No allotments yet — add one above. You set the budget; they choose who gets the tickets.
               </td>
             </tr>
           ) : (
             distributors.map((g) => {
               const kids = recipientsOf(g.id)
+              const summary = seatingSummary(g)
               return (
                 <Fragment key={g.id}>
                   <tr>
                     <td>
                       <div style={{ fontWeight: 600 }}>{g.name}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                        {typeName(g.guest_type_id)} · <span className="mono">{g.email}</span>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {g.email}
                       </div>
-                    </td>
-                    <td style={{ fontSize: 12.5 }}>
-                      {(g.ticket_allotment || []).length === 0
-                        ? '—'
-                        : g.ticket_allotment.map((r) => (
-                            <div key={r.date || 'any'}>
-                              {fmtDay(r.date)} × {r.quantity}
-                            </div>
-                          ))}
-                    </td>
-                    <td className="mono">
-                      {g.allotment_distributed} / {g.allotment_total}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
                         <button className="btn btn-secondary btn-sm" onClick={() => copyPortalLink(g)}>
                           Copy link
                         </button>
                         <button
                           className="btn btn-secondary btn-sm"
                           disabled={busyId === g.id}
-                          onClick={() => toggleLinkSent(g)}
+                          onClick={() => emailPortalLink(g)}
+                          title="Email the portal link now"
                           style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
                         >
-                          {g.link_sent_at ? '✓ Link sent' : 'Link not sent'}
+                          {g.link_sent_at ? '✓ Email again' : 'Email link'}
                         </button>
                       </div>
                     </td>
                     <td>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        disabled={busyId === g.id}
-                        title="Recipients from this allotment on the same day: one section side by side, or spread individually"
-                        onClick={() => toggleCohort(g)}
+                      <select
+                        style={selectStyle}
+                        value={gridVal(g, 'guest_type_id')}
+                        onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
                       >
-                        {g.cohort_together !== false ? 'Together' : 'Spread'}
-                      </button>
+                        {guestTypes.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    {budgetCols.map((d) => (
+                      <td key={d || 'any'} style={{ textAlign: 'center' }}>
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="—"
+                          title="Tickets they can hand out for this day"
+                          style={{ ...selectStyle, width: 52, textAlign: 'center' }}
+                          value={gridVal(g, `day:${d}`)}
+                          onChange={(e) => setGridVal(g, `day:${d}`, e.target.value)}
+                        />
+                      </td>
+                    ))}
+                    <td>
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="all"
+                        title="Blank = the day budgets stand alone. A number lower than their sum caps the whole allotment."
+                        style={{ ...selectStyle, width: 56, textAlign: 'center' }}
+                        value={gridVal(g, 'spend_total')}
+                        onChange={(e) => setGridVal(g, 'spend_total', e.target.value)}
+                      />
+                    </td>
+                    <td className="mono">
+                      {g.allotment_distributed} /{' '}
+                      {g.spend_total && g.spend_total < g.allotment_total ? g.spend_total : g.allotment_total}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {summary ? (
+                        <span title="From the guest type's seating priorities — placement is automatic on confirm">
+                          via {summary}
+                        </span>
+                      ) : (
+                        <span
+                          style={{ color: 'var(--danger, #c55)' }}
+                          title="This type has no seating priorities — recipients will need manual seating"
+                        >
+                          no priorities set
+                        </span>
+                      )}
+                      <div>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginTop: 4 }}
+                          disabled={busyId === g.id}
+                          title="Same-day recipients from this allotment: one section side by side, or spread individually"
+                          onClick={() => toggleCohort(g)}
+                        >
+                          {g.cohort_together !== false ? 'Together' : 'Spread'}
+                        </button>
+                      </div>
                     </td>
                     <td className="actions-cell">
                       <button className="btn btn-secondary btn-sm" onClick={() => setExpandedId(expandedId === g.id ? null : g.id)}>
@@ -408,11 +594,11 @@ export default function AllotmentsTab({ onToast, eventId }) {
                   </tr>
                   {expandedId === g.id && (
                     <tr>
-                      <td colSpan={6} style={{ background: 'var(--surface-alt)' }}>
+                      <td colSpan={colCount} style={{ background: 'var(--surface-alt)' }}>
                         {kids.length === 0 ? (
                           <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0' }}>
                             No recipients yet — they appear here the moment {g.name} enters them in the
-                            portal. Each gets their own confirm link by email automatically.
+                            portal, and each is emailed their own confirm link automatically.
                           </p>
                         ) : (
                           <table className="data-table" style={{ margin: '6px 0' }}>
@@ -431,7 +617,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
                                 <tr key={r.id}>
                                   <td>
                                     {r.name}
-                                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }} className="mono">
+                                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                       {r.email}
                                     </div>
                                   </td>
@@ -469,7 +655,9 @@ export default function AllotmentsTab({ onToast, eventId }) {
                                         Remove
                                       </button>
                                     ) : (
-                                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>confirmed</span>
+                                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                        confirmed — manage on Guest list
+                                      </span>
                                     )}
                                   </td>
                                 </tr>

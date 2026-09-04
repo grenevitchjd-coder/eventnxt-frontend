@@ -187,6 +187,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ rsvp_base_url: window.location.origin }),
     }),
+  sendPortalLinksBulk: (eventId) =>
+    request(`/events/${eventId}/guests/send-portal-links`, {
+      method: 'POST',
+      body: JSON.stringify({ rsvp_base_url: window.location.origin }),
+    }),
   sendGuestInvitesBulk: (eventId) =>
     request(`/events/${eventId}/guests/send-invites`, {
       method: 'POST',
