@@ -182,6 +182,11 @@ export const api = {
     }),
   getDoorRoster: (eventId) => request(`/events/${eventId}/guests/roster/door`),
   deleteGuest: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}`, { method: 'DELETE' }),
+  removeGuestWithNotice: (eventId, guestId, note) =>
+    request(`/events/${eventId}/guests/${guestId}/remove`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note || null }),
+    }),
   // Comp ticketing (guest modes)
   sendGuestTicket: (eventId, guestId) =>
     request(`/events/${eventId}/guests/${guestId}/send-ticket`, { method: 'POST' }),

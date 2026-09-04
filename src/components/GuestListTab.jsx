@@ -17,6 +17,20 @@ export default function GuestListTab({ onToast, eventId }) {
   const [search, setSearch] = useState('')
   const [dayFilter, setDayFilter] = useState('')
 
+  const removeGuest = async (g) => {
+    const note = window.prompt(
+      `Remove ${g.name}? Their codes stop admitting${g.allocation_status === 'confirmed' ? ' and they get a cancellation email' : ''}.\n\nOptional note to include (leave blank for none):`
+    )
+    if (note === null) return // cancelled the prompt
+    try {
+      await api.removeGuestWithNotice(loadedEventId, g.id, note.trim() || null)
+      onToast(`${g.name} removed${g.allocation_status === 'confirmed' ? ' — cancellation email sent' : ''}`)
+      load(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
   const load = async (evId) => {
     try {
       const [r, gt] = await Promise.all([api.getDoorRoster(evId), api.listGuestTypes(evId)])
@@ -41,7 +55,15 @@ export default function GuestListTab({ onToast, eventId }) {
     ? [...new Set(roster.flatMap((g) => [g.visit_date, ...(g.tickets || []).map((t) => t.valid_date)]).filter(Boolean))].sort()
     : []
 
+  // Allotment HOLDERS (sponsor entities) aren't guests at the door —
+  // only ticket-receiving people appear here. A holder is anyone some
+  // other row points at via allocated_by, plus known distributor rows
+  // are excluded server-side by having no admission of their own; the
+  // reliable client-side signal is: someone lists them as source.
+  const holderIds = new Set((roster || []).map((g) => g.allocated_by_guest_id).filter(Boolean))
+
   const visible = (roster || []).filter((g) => {
+    if (holderIds.has(g.id)) return false
     if (dayFilter && g.visit_date !== dayFilter && !(g.tickets || []).some((t) => t.valid_date === dayFilter)) return false
     if (search) {
       const q = search.toLowerCase()
@@ -58,10 +80,10 @@ export default function GuestListTab({ onToast, eventId }) {
     <>
       <div className="page-title">Guest list</div>
       <p className="page-subtitle">
-        The door reference — everyone on the list with their codes, days, and seats, whether they came
-        from an invite or an allotment. When someone never got their email: find them here, confirm
-        their tickets, and enter a code in Check-in manually. To change anything about a guest, use the
-        Invites or Allotments page.
+        Everyone actually receiving tickets — invitees and allotment recipients (the allotment entities
+        themselves live on Allotments). Look someone up, confirm their codes, or remove a guest —
+        removing a confirmed guest cancels their codes and emails them a notice with your optional
+        note. For grants, seats, and RSVP details, use the Invites or Allotments page.
       </p>
 
       <div className="inline-form" style={{ marginBottom: 14 }}>
@@ -101,12 +123,13 @@ export default function GuestListTab({ onToast, eventId }) {
             <th>Status</th>
             <th>Party</th>
             <th>Tickets</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={5} className="empty-state">
+              <td colSpan={6} className="empty-state">
                 {roster.length === 0 ? 'No guests yet.' : 'No one matches — check the spelling or clear the day filter.'}
               </td>
             </tr>
@@ -160,6 +183,11 @@ export default function GuestListTab({ onToast, eventId }) {
                       ))}
                     </div>
                   )}
+                </td>
+                <td className="actions-cell">
+                  <button className="btn btn-danger btn-sm" onClick={() => removeGuest(g)}>
+                    Remove
+                  </button>
                 </td>
               </tr>
             ))

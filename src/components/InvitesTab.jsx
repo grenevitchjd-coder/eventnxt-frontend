@@ -332,6 +332,13 @@ export default function InvitesTab({ onToast, eventId }) {
   }
 
   const deleteGuest = async (guest) => {
+    if (guest.allocation_status === 'confirmed') {
+      onToast(
+        `${guest.name} is confirmed — remove them from the Guest list page, which cancels their tickets and emails them (optional note).`,
+        true
+      )
+      return
+    }
     if (!window.confirm(`Remove ${guest.name}?`)) return
     try {
       await api.deleteGuest(loadedEventId, guest.id)
