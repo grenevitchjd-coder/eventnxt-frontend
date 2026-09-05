@@ -1386,7 +1386,9 @@ export default function InvitesTab({ onToast, eventId }) {
                             </button>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                        <div>
+                          <span className="meta-label">&nbsp;</span>
+                          <div style={{ display: 'flex', gap: 6 }}>
                           {seatAssignable(g) && (
                             <button
                               className="btn btn-secondary btn-sm"
@@ -1407,6 +1409,7 @@ export default function InvitesTab({ onToast, eventId }) {
                           <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
                             Delete
                           </button>
+                          </div>
                         </div>
                         </div>
                         </td>
