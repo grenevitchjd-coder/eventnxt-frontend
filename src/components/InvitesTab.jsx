@@ -294,15 +294,20 @@ export default function InvitesTab({ onToast, eventId }) {
     return t && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count ? t.default_ticket_count : null
   }
 
-  // Ghost for ONE day cell: the shape default when the type declares
-  // one, else the type's explicit row for that day — i.e. what the
-  // backend's effective_allotment will grant if the cell stays empty.
-  const typeDayGhost = (g, d) => {
+  // The type's default for ONE day (shape default or explicit row) —
+  // the raw value, regardless of the guest's override state.
+  const typeDayDefault = (g, d) => {
     const shape = typeDerivedCount(g)
     if (shape) return shape
     const rows = typeAllotments[gridVal(g, 'guest_type_id') || g.guest_type_id]
     return rows && rows[d] ? rows[d] : null
   }
+
+  // Ghost for ONE day cell. Only meaningful while the guest still
+  // INHERITS from the type: once they're overridden, empty cells mean
+  // ZERO server-side, so showing the type's number would be a lie (the
+  // "my edit reset itself" illusion).
+  const typeDayGhost = (g, d) => (g.ticket_allotment_overridden ? null : typeDayDefault(g, d))
 
   // Ghost for the Total cell: the type's default_spend_total (stamped
   // onto new guests at add; shown as a hint for guests without one).
@@ -330,8 +335,21 @@ export default function InvitesTab({ onToast, eventId }) {
     const touchedDays = Object.keys(e).some((k) => k.startsWith('day:'))
     let ticket_allotment = null // null = leave the guest's rows as they are
     if (touchedDays) {
+      // Untouched EMPTY cells materialize their displayed meaning: for a
+      // guest still inheriting, that's the type's ghost value (so editing
+      // Friday keeps Thursday's ghosted grant instead of zeroing it); for
+      // an overridden guest, empty means zero.
       ticket_allotment = guestEventDays
-        .map((d) => ({ date: d, quantity: parseInt(gridVal(g, `day:${d}`), 10) || 0 }))
+        .map((d) => {
+          const raw = String(gridVal(g, `day:${d}`))
+          const quantity =
+            raw !== ''
+              ? parseInt(raw, 10) || 0
+              : g.ticket_allotment_overridden
+                ? 0
+                : typeDayDefault(g, d) || 0
+          return { date: d, quantity }
+        })
         .filter((r) => r.quantity > 0)
     }
     return {
