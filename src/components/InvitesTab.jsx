@@ -281,7 +281,7 @@ export default function InvitesTab({ onToast, eventId }) {
       seating_category_id: gridVal(g, 'seating_category_id') || null,
       section_label: gridVal(g, 'section_label') || null,
       visit_date: g.visit_date || null,
-      allocation_status: gridVal(g, 'allocation_status') || g.allocation_status,
+      allocation_status: g.allocation_status,
       party_size: derivedParty(g),
       perks: g.perks || null,
       comments: g.comments || null,
@@ -1341,19 +1341,6 @@ export default function InvitesTab({ onToast, eventId }) {
                       <tr className="invite-meta">
                         <td colSpan={inviteColCount - 1}>
                         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                        <div>
-                          <span className="meta-label">Status</span>
-                          <select
-                            style={selectStyle}
-                            className={`status-${gridVal(g, 'allocation_status')}`}
-                            value={gridVal(g, 'allocation_status')}
-                            onChange={(e) => setGridVal(g, 'allocation_status', e.target.value)}
-                          >
-                            <option value="pending">Pending</option>
-                            <option value="confirmed">Confirmed</option>
-                            <option value="declined">Declined</option>
-                          </select>
-                        </div>
                         <div style={{ fontSize: 12, minWidth: 90 }}>
                           <span className="meta-label">Progress</span>
                           {g.rsvp_confirmed && <span>RSVP: {g.rsvp_confirmed}</span>}
