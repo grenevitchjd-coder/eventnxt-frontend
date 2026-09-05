@@ -503,7 +503,7 @@ a:focus-visible {
 }
 
 .table-scroll > .data-table th:first-child,
-.table-scroll > .data-table td:first-child {
+.table-scroll > .data-table td:first-child:not([colspan]) {
   position: sticky;
   left: 0;
   z-index: 2;
@@ -515,6 +515,32 @@ a:focus-visible {
 .table-scroll > .data-table th:first-child {
   z-index: 3;
   background: var(--surface-alt);
+}
+
+/* Two-row invite blocks: row 1 is the OFFER (name spans both rows), row 2
+   is the lifecycle strip. The border between the two halves of one guest
+   disappears; the guest separator lives under the meta row. */
+.data-table tr.invite-main td {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+.data-table tr.invite-main td[rowspan] {
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table tr.invite-meta td {
+  padding-top: 4px;
+}
+
+.meta-label {
+  display: block;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 3px;
 }
 
 .actions-cell {

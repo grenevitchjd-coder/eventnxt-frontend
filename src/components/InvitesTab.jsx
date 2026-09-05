@@ -773,6 +773,10 @@ export default function InvitesTab({ onToast, eventId }) {
     return true
   })
 
+  // Two-row layout: the thead labels only the OFFER row (Name spans both
+  // rows). Name + Type + Seating + day columns + Party + Total + Pull.
+  const inviteColCount = 6 + guestEventDays.length - (externalTicketing ? 1 : 0)
+
   return (
     <>
       <div className="page-title">Invites</div>
@@ -1155,17 +1159,12 @@ export default function InvitesTab({ onToast, eventId }) {
                 <th title="Heads in the party — also the seat count when hand-assigning">Party</th>
                 <th title="Set LOWER than the day amounts to let the guest choose where to spend">Total</th>
                 {!externalTicketing && <th title="When tickets are pulled from sellable inventory">Pull</th>}
-                <th>Status</th>
-                <th>Progress</th>
-                <th>Sent</th>
-                <th>RSVP link</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
               {visibleGuests.length === 0 ? (
                 <tr>
-                  <td colSpan={10 + guestEventDays.length} className="empty-state">
+                  <td colSpan={inviteColCount} className="empty-state">
                     {invitees.length === 0
                       ? guests.length === 0
                         ? 'No guests yet — add people above.'
@@ -1177,8 +1176,9 @@ export default function InvitesTab({ onToast, eventId }) {
                 visibleGuests.map((g) => (
                   <Fragment key={g.id}>
                     {(
-                      <tr>
-                        <td>
+                      <>
+                      <tr className="invite-main">
+                        <td rowSpan={2}>
                           {g.name}
                           <span className="pill pill-pending" style={{ marginLeft: 6, fontSize: 10.5 }}>
                             {g.effective_mode || 'invite'}
@@ -1316,7 +1316,12 @@ export default function InvitesTab({ onToast, eventId }) {
                             </select>
                           </td>
                         )}
-                        <td>
+                      </tr>
+                      <tr className="invite-meta">
+                        <td colSpan={inviteColCount - 1}>
+                        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                        <div>
+                          <span className="meta-label">Status</span>
                           <select
                             style={selectStyle}
                             className={`status-${gridVal(g, 'allocation_status')}`}
@@ -1327,8 +1332,9 @@ export default function InvitesTab({ onToast, eventId }) {
                             <option value="confirmed">Confirmed</option>
                             <option value="declined">Declined</option>
                           </select>
-                        </td>
-                        <td style={{ fontSize: 12 }}>
+                        </div>
+                        <div style={{ fontSize: 12, minWidth: 90 }}>
+                          <span className="meta-label">Progress</span>
                           {g.rsvp_confirmed && <span>RSVP: {g.rsvp_confirmed}</span>}
                           {g.ticket_count > 0 && (
                             <span style={{ display: 'block', color: 'var(--text-muted)' }}>{g.ticket_count} codes</span>
@@ -1337,9 +1343,10 @@ export default function InvitesTab({ onToast, eventId }) {
                             <span style={{ display: 'block', color: 'var(--text-muted)' }}>{g.allotment_total} offered</span>
                           )}
                           {!g.rsvp_confirmed && !g.ticket_count && !(g.allotment_total > 0) && '—'}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        </div>
+                        <div>
+                          <span className="meta-label">Sent</span>
+                          <div style={{ display: 'flex', gap: 4 }}>
                             <button
                               className="btn btn-secondary btn-sm"
                               onClick={() => toggleSentStatus(g)}
@@ -1359,8 +1366,9 @@ export default function InvitesTab({ onToast, eventId }) {
                               </button>
                             )}
                           </div>
-                        </td>
-                        <td>
+                        </div>
+                        <div>
+                          <span className="meta-label">RSVP link</span>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <a
                               href={rsvpUrl(g.rsvp_token)}
@@ -1377,8 +1385,8 @@ export default function InvitesTab({ onToast, eventId }) {
                               Email
                             </button>
                           </div>
-                        </td>
-                        <td className="actions-cell">
+                        </div>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                           {seatAssignable(g) && (
                             <button
                               className="btn btn-secondary btn-sm"
@@ -1399,13 +1407,16 @@ export default function InvitesTab({ onToast, eventId }) {
                           <button className="btn btn-danger btn-sm" onClick={() => deleteGuest(g)}>
                             Delete
                           </button>
+                        </div>
+                        </div>
                         </td>
                       </tr>
+                      </>
                     )}
                     {seatsGuestId === g.id && (
                       <tr>
                         <td></td>
-                        <td colSpan={9 + guestEventDays.length + (externalTicketing ? 0 : 1)} style={{ paddingTop: 0, paddingBottom: 16 }}>
+                        <td colSpan={inviteColCount - 1} style={{ paddingTop: 0, paddingBottom: 16 }}>
                           <div style={{ background: 'var(--surface-alt)', borderRadius: 8, padding: '12px 14px' }}>
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                               {g.name}&apos;s seats in {categoryName(g.seating_category_id)} — party of {g.party_size}
