@@ -17,7 +17,14 @@ import Papa from 'papaparse'
 import { api } from '../api'
 
 const rsvpUrl = (token) => `${window.location.origin}/rsvp/${token}`
-const selectStyle = { fontSize: 12.5, padding: '4px 6px', width: '100%' }
+const selectStyle = {
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
+  padding: '6px 8px',
+  color: 'var(--text)',
+  fontSize: 13,
+}
 
 export default function AllotmentsTab({ onToast, eventId }) {
   const [loadedEventId, setLoadedEventId] = useState(null)
@@ -635,7 +642,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
                     </td>
                     <td>
                       <select
-                        style={selectStyle}
+                        style={{ ...selectStyle, maxWidth: 210 }}
                         title="Where this allotment's recipients are placed — Auto follows the type's priorities; a choice here wins while it has room, day-mapped per recipient"
                         value={familyRepId(gridVal(g, 'recipient_seating_category_id'))}
                         onChange={(e) => {
