@@ -521,11 +521,38 @@ export default function PublicRSVPPage() {
           Hi {info.guest_name}
         </h1>
         <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginBottom: 20 }}>
-          You have tickets to give out — each day below is its own separate amount.
+          You have tickets to give out.
         </p>
 
+        {(() => {
+          const dayTotalSum = (info.day_allotments || []).reduce((n, d) => n + (d.total || 0), 0)
+          const capTotal = info.spend_total != null ? Math.min(info.spend_total, dayTotalSum) : dayTotalSum
+          const givenTotal =
+            (info.day_allotments || []).reduce((n, d) => n + (d.distributed || 0), 0) +
+            Object.values(draftByDay).reduce((n, q) => n + q, 0)
+          const remainingByDays = (info.day_allotments || []).reduce((n, d) => n + liveRemaining(d), 0)
+          const overallRemaining = Math.max(Math.min(capTotal - givenTotal, remainingByDays), 0)
+          const spendCapped = info.spend_total != null && info.spend_total < dayTotalSum
+          return (
+            <div className="panel" style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.1 }}>
+                {overallRemaining}
+                <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-muted)' }}> of {capTotal}</span>
+              </div>
+              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                tickets left to give out
+              </div>
+              {spendCapped && (
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+                  Your {capTotal}-ticket total spans the days below — each day also has its own cap.
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
         <div className="panel">
-          <div className="panel-title">Your tickets</div>
+          <div className="panel-title">Availability by day</div>
           <table className="data-table">
             <thead>
               <tr>
