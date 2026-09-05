@@ -1286,12 +1286,17 @@ export default function InvitesTab({ onToast, eventId }) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th className="col-flex">Seating</th>
+                <th>Seating</th>
                 {guestEventDays.map((d) => (
-                  <th key={d} style={{ textAlign: 'center' }}>{fmtGuestDay(d)}</th>
+                  <th key={d} style={{ textAlign: 'center' }}>
+                    <div>{new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short' })}</div>
+                    <div style={{ fontWeight: 400, fontSize: 11, color: 'var(--text-muted)' }}>
+                      {new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                    </div>
+                  </th>
                 ))}
-                <th title="Set LOWER than the day amounts to let the guest choose where to spend">Total</th>
-                {!externalTicketing && <th title="When tickets are pulled from sellable inventory">Pull</th>}
+                <th className={externalTicketing ? 'col-flex' : undefined} title="Set LOWER than the day amounts to let the guest choose where to spend">Total</th>
+                {!externalTicketing && <th className="col-flex" title="When tickets are pulled from sellable inventory">Pull</th>}
               </tr>
             </thead>
             <tbody>
