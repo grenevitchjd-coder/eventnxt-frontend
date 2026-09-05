@@ -478,7 +478,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
   // Two-row blocks: thead holds the OFFER (Allotment name spans both
   // rows, then day budgets, Total, Given out); the lifecycle strip below
   // each row carries Type / Recipients' seating / Pull / actions.
-  const colCount = 3 + budgetCols.length
+  const colCount = 5 + budgetCols.length - (externalTicketing ? 1 : 0)
 
   return (
     <>
@@ -587,6 +587,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
         <thead>
           <tr>
             <th>Allotment</th>
+            <th>Recipients&apos; seating</th>
             {budgetCols.map((d) => (
               <th key={d || 'any'} style={{ textAlign: 'center' }}>
                 {d ? (
@@ -604,6 +605,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
             <th title="Set LOWER than the day budgets to cap the whole allotment — e.g. 25 across 10/10/10. The portal enforces it.">
               Total
             </th>
+            {!externalTicketing && <th title="When recipients' tickets are pulled from sellable inventory">Pull</th>}
             <th className="col-flex">Given out</th>
           </tr>
         </thead>
@@ -630,20 +632,42 @@ export default function AllotmentsTab({ onToast, eventId }) {
                       <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                         {g.email}
                       </div>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => copyPortalLink(g)}>
-                          Copy link
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          disabled={busyId === g.id}
-                          onClick={() => emailPortalLink(g)}
-                          title="Email the portal link now"
-                          style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
-                        >
-                          {g.link_sent_at ? '✓ Email again' : 'Email link'}
-                        </button>
-                      </div>
+                    </td>
+                    <td>
+                      <select
+                        style={selectStyle}
+                        title="Where this allotment's recipients are placed — Auto follows the type's priorities; a choice here wins while it has room, day-mapped per recipient"
+                        value={familyRepId(gridVal(g, 'recipient_seating_category_id'))}
+                        onChange={(e) => {
+                          setGridVal(g, 'recipient_seating_category_id', e.target.value)
+                          setGridVal(g, 'recipient_section_label', '')
+                        }}
+                      >
+                        <option value="">{summary ? `Auto — via ${summary}` : 'Auto (no priorities set)'}</option>
+                        {seatingFamilies.map((f) => (
+                          <option key={f.rep.id} value={f.rep.id}>
+                            {f.base}
+                          </option>
+                        ))}
+                      </select>
+                      {gridVal(g, 'recipient_seating_category_id') &&
+                        sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            <select
+                              style={selectStyle}
+                              title="A specific section, or anywhere in the area"
+                              value={gridVal(g, 'recipient_section_label')}
+                              onChange={(e) => setGridVal(g, 'recipient_section_label', e.target.value)}
+                            >
+                              <option value="">Anywhere</option>
+                              {sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).map((s) => (
+                                <option key={s} value={s}>
+                                  Sec {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                     </td>
                     {budgetCols.map((d) => (
                       <td key={d || 'any'} style={{ textAlign: 'center' }}>
@@ -669,6 +693,20 @@ export default function AllotmentsTab({ onToast, eventId }) {
                         onChange={(e) => setGridVal(g, 'spend_total', e.target.value)}
                       />
                     </td>
+                    {!externalTicketing && (
+                      <td>
+                        <select
+                          style={selectStyle}
+                          title="When recipients' tickets are pulled from sellable inventory"
+                          value={gridVal(g, 'hold_timing')}
+                          onChange={(e) => setGridVal(g, 'hold_timing', e.target.value)}
+                        >
+                          <option value="now">Now</option>
+                          <option value="on_confirm">On yes</option>
+                          <option value="later">Later</option>
+                        </select>
+                      </td>
+                    )}
                     <td className="mono">
                       {g.allotment_distributed} /{' '}
                       {g.spend_total && g.spend_total < g.allotment_total ? g.spend_total : g.allotment_total}
@@ -692,40 +730,37 @@ export default function AllotmentsTab({ onToast, eventId }) {
                       </select>
                     </div>
                     <div>
-                      <span className="meta-label">Recipients&apos; seating</span>
+                      <span className="meta-label">Portal link</span>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <select
-                          style={selectStyle}
-                          title="Where this allotment's recipients are placed — Auto follows the type's priorities; a choice here wins while it has room, day-mapped per recipient"
-                          value={familyRepId(gridVal(g, 'recipient_seating_category_id'))}
-                          onChange={(e) => {
-                            setGridVal(g, 'recipient_seating_category_id', e.target.value)
-                            setGridVal(g, 'recipient_section_label', '')
-                          }}
+                        <a
+                          href={rsvpUrl(g.rsvp_token)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-secondary btn-sm"
+                          title="Open their distribution portal"
                         >
-                          <option value="">{summary ? `Auto — via ${summary}` : 'Auto (no priorities set)'}</option>
-                          {seatingFamilies.map((f) => (
-                            <option key={f.rep.id} value={f.rep.id}>
-                              {f.base}
-                            </option>
-                          ))}
-                        </select>
-                        {gridVal(g, 'recipient_seating_category_id') &&
-                          sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).length > 0 && (
-                            <select
-                              style={selectStyle}
-                              title="A specific section, or anywhere in the area"
-                              value={gridVal(g, 'recipient_section_label')}
-                              onChange={(e) => setGridVal(g, 'recipient_section_label', e.target.value)}
-                            >
-                              <option value="">Anywhere</option>
-                              {sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).map((s) => (
-                                <option key={s} value={s}>
-                                  Sec {s}
-                                </option>
-                              ))}
-                            </select>
-                          )}
+                          Open
+                        </a>
+                        <button className="btn btn-secondary btn-sm" onClick={() => copyPortalLink(g)}>
+                          Copy
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          disabled={busyId === g.id}
+                          onClick={() => emailPortalLink(g)}
+                          title="Email the portal link now"
+                          style={g.link_sent_at ? { borderColor: 'var(--success)', color: 'var(--success)' } : undefined}
+                        >
+                          {g.link_sent_at ? '✓ Email again' : 'Email'}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="meta-label">Recipients</span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setExpandedId(expandedId === g.id ? null : g.id)}>
+                          {expandedId === g.id ? 'Hide' : `Recipients (${kids.length})`}
+                        </button>
                         <button
                           className="btn btn-secondary btn-sm"
                           disabled={busyId === g.id}
@@ -736,31 +771,11 @@ export default function AllotmentsTab({ onToast, eventId }) {
                         </button>
                       </div>
                     </div>
-                    {!externalTicketing && (
-                      <div>
-                        <span className="meta-label">Pull</span>
-                        <select
-                          style={selectStyle}
-                          title="When recipients' tickets are pulled from sellable inventory"
-                          value={gridVal(g, 'hold_timing')}
-                          onChange={(e) => setGridVal(g, 'hold_timing', e.target.value)}
-                        >
-                          <option value="now">Now</option>
-                          <option value="on_confirm">On yes</option>
-                          <option value="later">Later</option>
-                        </select>
-                      </div>
-                    )}
                     <div>
                       <span className="meta-label">&nbsp;</span>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setExpandedId(expandedId === g.id ? null : g.id)}>
-                          {expandedId === g.id ? 'Hide' : `Recipients (${kids.length})`}
-                        </button>
-                        <button className="btn btn-danger btn-sm" disabled={busyId === g.id} onClick={() => deleteAllotment(g)}>
-                          Delete
-                        </button>
-                      </div>
+                      <button className="btn btn-danger btn-sm" disabled={busyId === g.id} onClick={() => deleteAllotment(g)}>
+                        Delete
+                      </button>
                     </div>
                     </div>
                     </td>
