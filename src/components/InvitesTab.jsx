@@ -239,6 +239,20 @@ export default function InvitesTab({ onToast, eventId }) {
     return t && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count ? t.default_ticket_count : null
   }
 
+  // Party is no longer a control: for a granted invitee, "heads" IS the
+  // largest single-day ticket count (2 Thu / 4 Sat = a party of 4 chairs
+  // at peak). Derived on save so seats and capacity math always agree
+  // with the offer. Matches the display semantics of the day cells: an
+  // empty cell means the type-default ghost, an explicit 0 means 0.
+  const derivedParty = (g) => {
+    const perDay = guestEventDays.map((d) => {
+      const raw = String(gridVal(g, `day:${d}`))
+      return raw === '' ? typeDerivedCount(g) || 0 : parseInt(raw, 10) || 0
+    })
+    const peak = perDay.length ? Math.max(...perDay) : 0
+    return peak > 0 ? peak : g.party_size || 1
+  }
+
   const buildGridPayload = (g) => {
     const e = gridEdits[g.id] || {}
     const touchedDays = Object.keys(e).some((k) => k.startsWith('day:'))
@@ -256,7 +270,7 @@ export default function InvitesTab({ onToast, eventId }) {
       section_label: gridVal(g, 'section_label') || null,
       visit_date: g.visit_date || null,
       allocation_status: gridVal(g, 'allocation_status') || g.allocation_status,
-      party_size: parseInt(gridVal(g, 'party_size'), 10) || 1,
+      party_size: derivedParty(g),
       perks: g.perks || null,
       comments: g.comments || null,
       guest_mode: g.guest_mode ?? null,
@@ -774,8 +788,9 @@ export default function InvitesTab({ onToast, eventId }) {
   })
 
   // Two-row layout: the thead labels only the OFFER row (Name spans both
-  // rows). Name + Type + Seating + day columns + Party + Total + Pull.
-  const inviteColCount = 6 + guestEventDays.length - (externalTicketing ? 1 : 0)
+  // rows). Name + Type + Seating + day columns + Total + Pull. Party is
+  // derived from the day amounts on save, not shown.
+  const inviteColCount = 5 + guestEventDays.length - (externalTicketing ? 1 : 0)
 
   return (
     <>
@@ -1156,7 +1171,6 @@ export default function InvitesTab({ onToast, eventId }) {
                 {guestEventDays.map((d) => (
                   <th key={d} style={{ textAlign: 'center' }}>{fmtGuestDay(d)}</th>
                 ))}
-                <th title="Heads in the party — also the seat count when hand-assigning">Party</th>
                 <th title="Set LOWER than the day amounts to let the guest choose where to spend">Total</th>
                 {!externalTicketing && <th title="When tickets are pulled from sellable inventory">Pull</th>}
               </tr>
@@ -1283,15 +1297,6 @@ export default function InvitesTab({ onToast, eventId }) {
                             />
                           </td>
                         ))}
-                        <td>
-                          <input
-                            type="number"
-                            min={1}
-                            style={{ ...selectStyle, width: 48, textAlign: 'center' }}
-                            value={gridVal(g, 'party_size')}
-                            onChange={(e) => setGridVal(g, 'party_size', e.target.value)}
-                          />
-                        </td>
                         <td>
                           <input
                             type="number"
