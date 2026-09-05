@@ -546,7 +546,16 @@ export default function AllotmentsTab({ onToast, eventId }) {
             <th>Type</th>
             {budgetCols.map((d) => (
               <th key={d || 'any'} style={{ textAlign: 'center' }}>
-                {fmtDay(d)}
+                {d ? (
+                  <>
+                    <div>{new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short' })}</div>
+                    <div style={{ fontWeight: 400, fontSize: 11, color: 'var(--text-muted)' }}>
+                      {new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'numeric', day: 'numeric' })}
+                    </div>
+                  </>
+                ) : (
+                  'Budget'
+                )}
               </th>
             ))}
             <th title="Set LOWER than the day budgets to cap the whole allotment — e.g. 25 across 10/10/10. The portal enforces it.">
@@ -556,7 +565,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
             <th title="Where the type's seating priorities will place recipients (automatic), and whether same-day recipients sit together">
               Seating
             </th>
-            <th></th>
+            <th className="col-flex"></th>
           </tr>
         </thead>
         <tbody>
