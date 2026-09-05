@@ -21,12 +21,17 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
 
   // ---- Guest types (accordion) ----
-  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '', default_spend_total: '' })
+  // One type = one offer, edited in ONE place: the expanded panel. The
+  // create form takes just name + mode; everything else (days, tickets,
+  // total, pull, seating) lives in the panel.
+  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite' })
   const [creatingType, setCreatingType] = useState(false)
-  const [editingTypeId, setEditingTypeId] = useState(null)
-  const [typeEditForm, setTypeEditForm] = useState({ name: '', guest_mode: '' })
-  const [savingType, setSavingType] = useState(false)
   const [expandedTypeId, setExpandedTypeId] = useState(null)
+  // Per-type offer drafts ({typeId: {field: value}}); a field absent
+  // from the draft reads from the stored type. day_scope '' = plain
+  // yes/no guest (stored null); 'specific' reveals the date grid.
+  const [offerDrafts, setOfferDrafts] = useState({})
+  const [savingOfferId, setSavingOfferId] = useState(null)
   const [priorityLists, setPriorityLists] = useState({}) // guestTypeId -> [priority entries]
   const [addPriorityCategoryId, setAddPriorityCategoryId] = useState('')
   const [addPrioritySection, setAddPrioritySection] = useState('')
@@ -46,6 +51,18 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
         setExpandedTypeId(null)
         setPriorityLists({})
         setTicketAllotments({})
+        // Prefetch each type's date rows so the collapsed glance line can
+        // say "specific dates" for legacy row-configured types before
+        // they're ever opened (best-effort).
+        Promise.all(
+          types.map(async (t) => {
+            try {
+              return [t.id, await api.listTicketAllotments(id, t.id)]
+            } catch {
+              return [t.id, []]
+            }
+          })
+        ).then((entries) => setTicketAllotments(Object.fromEntries(entries)))
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
       .catch((e) => onToast(e.message, true))
@@ -68,17 +85,15 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     e.preventDefault()
     setCreatingType(true)
     try {
-      await api.createGuestType(loadedEventId, {
+      const created = await api.createGuestType(loadedEventId, {
         name: typeForm.name,
         guest_mode: typeForm.guest_mode || null,
-        day_scope: typeForm.day_scope || null,
-        default_ticket_count: parseInt(typeForm.default_ticket_count, 10) || null,
-        default_hold_timing: typeForm.default_hold_timing || null,
-        default_spend_total: parseInt(typeForm.default_spend_total, 10) || null,
       })
-      onToast(`"${typeForm.name}" added`)
-      setTypeForm({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '', default_spend_total: '' })
+      onToast(`"${typeForm.name}" added — set up its offer below`)
+      setTypeForm({ name: '', guest_mode: 'invite' })
       loadEventData(loadedEventId)
+      // open the new type's panel so the offer gets configured right away
+      if (created && created.id) setTimeout(() => toggleExpandType(created.id), 0)
     } catch (err) {
       onToast(err.message, true)
     } finally {
@@ -86,29 +101,58 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     }
   }
 
-  const startEditType = (type) => {
-    setEditingTypeId(type.id)
-    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '', day_scope: type.day_scope || '', default_ticket_count: type.default_ticket_count || '', default_hold_timing: type.default_hold_timing || '', default_spend_total: type.default_spend_total || '' })
+  // ---- The offer editor (in the expanded panel) ----
+
+  const offerVal = (t, field) => {
+    const d = offerDrafts[t.id] || {}
+    if (field in d) return d[field]
+    if (field === 'day_scope') {
+      // legacy types with explicit date rows but no scope open as
+      // 'specific' so their rows are visible and editable
+      if (t.day_scope) return t.day_scope
+      return (ticketAllotments[t.id] || []).length > 0 ? 'specific' : ''
+    }
+    const v = t[field]
+    return v === null || v === undefined ? '' : String(v)
   }
 
-  const saveEditType = async (typeId) => {
-    setSavingType(true)
+  const setOfferVal = (t, field, value) =>
+    setOfferDrafts((prev) => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [field]: value } }))
+
+  const offerDirty = (t) => Object.keys(offerDrafts[t.id] || {}).length > 0
+
+  const saveOffer = async (t) => {
+    const scope = offerVal(t, 'day_scope')
+    const rows = ticketAllotments[t.id] || []
+    if (scope !== 'specific' && rows.length > 0) {
+      const ok = window.confirm(
+        `"${t.name}" has ${rows.length} specific date row${rows.length === 1 ? '' : 's'}. ` +
+          'Saving with a different Days setting removes them (the new setting takes over). Continue?'
+      )
+      if (!ok) return
+    }
+    setSavingOfferId(t.id)
     try {
-      await api.updateGuestType(loadedEventId, typeId, {
-        name: typeEditForm.name,
-        guest_mode: typeEditForm.guest_mode || null,
-        day_scope: typeEditForm.day_scope || null,
-        default_ticket_count: parseInt(typeEditForm.default_ticket_count, 10) || null,
-        default_hold_timing: typeEditForm.default_hold_timing || null,
-        default_spend_total: parseInt(typeEditForm.default_spend_total, 10) || null,
+      if (scope !== 'specific' && rows.length > 0) {
+        for (const r of rows) await api.deleteTicketAllotmentDay(loadedEventId, t.id, r.date)
+        setTicketAllotments((prev) => ({ ...prev, [t.id]: [] }))
+      }
+      await api.updateGuestType(loadedEventId, t.id, {
+        name: offerVal(t, 'name') || t.name,
+        guest_mode: offerVal(t, 'guest_mode') || null,
+        day_scope: scope === 'specific' ? 'specific' : scope || null,
+        default_ticket_count: parseInt(offerVal(t, 'default_ticket_count'), 10) || null,
+        default_hold_timing: offerVal(t, 'default_hold_timing') || null,
+        default_spend_total: parseInt(offerVal(t, 'default_spend_total'), 10) || null,
       })
-      onToast('Saved')
-      setEditingTypeId(null)
+      onToast(`"${offerVal(t, 'name') || t.name}" saved — newly added guests get these defaults`)
+      setOfferDrafts((prev) => ({ ...prev, [t.id]: {} }))
       loadEventData(loadedEventId)
+      setTimeout(() => toggleExpandType(t.id), 0)
     } catch (err) {
       onToast(err.message, true)
     } finally {
-      setSavingType(false)
+      setSavingOfferId(null)
     }
   }
 
@@ -220,6 +264,23 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   }
 
   const categoryName = (id) => categories?.find((c) => c.id === id)?.name || '—'
+  // Day-cloned pool families ("Row 2", "Row 2 (12/25)", ...): priorities
+  // are configured once per AREA — the backend maps them to the right
+  // day's sibling per guest (pool_for_day). So the add-dropdown shows
+  // one entry per family, and existing priorities display the family
+  // name even when they point at a dated clone.
+  const famBase = (name) => String(name || '').replace(/\s*\(\d{2}\/\d{2}\)$/, '')
+  const familyCategories = (() => {
+    const byBase = new Map()
+    for (const c of categories || []) {
+      const base = famBase(c.name)
+      const cur = byBase.get(base)
+      const isBare = c.name === base
+      if (!cur || (isBare && !cur.bare)) byBase.set(base, { ...c, name: base, bare: isBare })
+    }
+    return [...byBase.values()]
+  })()
+  const familyName = (id) => famBase(categoryName(id))
 
   return (
     <>
@@ -266,61 +327,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                   <option value="distribute">Allotment — hands tickets out to their people (Allotments page)</option>
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="type-scope" title="The SHAPE of the offer — actual dates are chosen per guest, so one type covers a Thu-only and a Fri-only offer">
-                  Days offered
-                </label>
-                <select
-                  id="type-scope"
-                  value={typeForm.day_scope}
-                  onChange={(e) => setTypeForm({ ...typeForm, day_scope: e.target.value })}
-                >
-                  <option value="">Set per guest (no default)</option>
-                  <option value="single">Single day — picked per guest</option>
-                  <option value="specific">Specific days — set per guest</option>
-                  <option value="choose">Guest chooses — spends a total across days</option>
-                  <option value="all">All days — every event day, follows date changes</option>
-                </select>
-              </div>
-              <div className="field" style={{ width: 110 }}>
-                <label htmlFor="type-count">Tickets</label>
-                <input
-                  id="type-count"
-                  type="number"
-                  min={1}
-                  placeholder="e.g. 2"
-                  value={typeForm.default_ticket_count}
-                  onChange={(e) => setTypeForm({ ...typeForm, default_ticket_count: e.target.value })}
-                />
-              </div>
-              <div className="field" style={{ width: 110 }}>
-                <label htmlFor="type-total" title="The across-days cap stamped on each added guest. Set it LOWER than the day amounts and their RSVP page becomes a chooser — 'place your N across these caps'. Blank = fixed offer.">
-                  Total (cap)
-                </label>
-                <input
-                  id="type-total"
-                  type="number"
-                  min={1}
-                  placeholder="all"
-                  value={typeForm.default_spend_total}
-                  onChange={(e) => setTypeForm({ ...typeForm, default_spend_total: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="type-hold" title="Default for new guests of this type — when their tickets are pulled from sellable inventory">
-                  Pull from inventory
-                </label>
-                <select
-                  id="type-hold"
-                  value={typeForm.default_hold_timing}
-                  onChange={(e) => setTypeForm({ ...typeForm, default_hold_timing: e.target.value })}
-                >
-                  <option value="">Now (default)</option>
-                  <option value="now">Now — held the moment it's sent</option>
-                  <option value="on_confirm">On RSVP yes</option>
-                  <option value="later">Later — no hold yet</option>
-                </select>
-              </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
                 Add guest type
               </button>
@@ -345,49 +351,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
               ) : (
                 guestTypes.map((t) => (
                   <Fragment key={t.id}>
-                    {editingTypeId === t.id ? (
-                      <tr>
-                        <td></td>
-                        <td>
-                          <input
-                            value={typeEditForm.name}
-                            onChange={(e) => setTypeEditForm({ ...typeEditForm, name: e.target.value })}
-                            style={{ width: '100%' }}
-                          />
-                            <select
-                              style={{ marginTop: 6 }}
-                              value={typeEditForm.guest_mode}
-                              onChange={(e) => setTypeEditForm({ ...typeEditForm, guest_mode: e.target.value })}
-                            >
-                              <option value="invite">Guest invite — RSVPs for themselves</option>
-                              <option value="select">Guest invite — picks their own days</option>
-                              <option value="distribute">Allotment — hands tickets out</option>
-                              {typeEditForm.guest_mode === '' && <option value="">Auto (legacy — retired)</option>}
-                            </select>
-                            <input
-                              type="number"
-                              min={1}
-                              placeholder="Total (cap) — blank = fixed offer"
-                              title="Across-days cap stamped on each added guest — lower than the day amounts turns their RSVP into a chooser"
-                              style={{ marginTop: 6, width: '100%' }}
-                              value={typeEditForm.default_spend_total}
-                              onChange={(e) => setTypeEditForm({ ...typeEditForm, default_spend_total: e.target.value })}
-                            />
-                        </td>
-                        <td className="actions-cell">
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            disabled={savingType}
-                            onClick={() => saveEditType(t.id)}
-                          >
-                            Save
-                          </button>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingTypeId(null)}>
-                            Cancel
-                          </button>
-                        </td>
-                      </tr>
-                    ) : (
+                    {(
                       <tr
                         style={{ cursor: 'pointer' }}
                         onClick={() => toggleExpandType(t.id)}
@@ -415,12 +379,21 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                         <td>
                           <div>{t.name}</div>
                           <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            Click to set up seating priority &amp; ticket allotment
+                            {[
+                              { invite: 'Invite', select: 'Invite (picks days)', distribute: 'Allotment' }[t.guest_mode] || 'Invite',
+                              { all: 'all days', single: 'one day per guest', choose: 'guest chooses', specific: 'specific dates' }[
+                                t.day_scope || ((ticketAllotments[t.id] || []).length > 0 ? 'specific' : '')
+                              ] || 'no ticket default',
+                              t.default_ticket_count ? `${t.default_ticket_count}/day` : null,
+                              t.default_spend_total ? `cap ${t.default_spend_total}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
                           </div>
                         </td>
                         <td className="actions-cell" onClick={(e) => e.stopPropagation()}>
-                          <button className="btn btn-secondary btn-sm" onClick={() => startEditType(t)}>
-                            Edit
+                          <button className="btn btn-secondary btn-sm" onClick={() => toggleExpandType(t.id)}>
+                            {expandedTypeId === t.id ? 'Close' : 'Edit'}
                           </button>
                           <button className="btn btn-danger btn-sm" onClick={() => deleteType(t)}>
                             Delete
@@ -439,6 +412,78 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               padding: '12px 14px',
                             }}
                           >
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                              The offer — what a &ldquo;{offerVal(t, 'name') || t.name}&rdquo; gets when added.
+                              Days and amounts here are defaults; both stay overridable per guest.
+                            </div>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
+                              <div className="field" style={{ minWidth: 150 }}>
+                                <label>Name</label>
+                                <input value={offerVal(t, 'name') || t.name} onChange={(e) => setOfferVal(t, 'name', e.target.value)} />
+                              </div>
+                              <div className="field">
+                                <label title="Which page guests of this type live on, and which flow they get">Offering type</label>
+                                <select value={offerVal(t, 'guest_mode')} onChange={(e) => setOfferVal(t, 'guest_mode', e.target.value)}>
+                                  <option value="invite">Guest invite — RSVPs for themselves</option>
+                                  <option value="select">Guest invite — picks their own days</option>
+                                  <option value="distribute">Allotment — hands tickets out</option>
+                                  {offerVal(t, 'guest_mode') === '' && <option value="">Auto (legacy — retired)</option>}
+                                </select>
+                              </div>
+                              <div className="field">
+                                <label title="The SHAPE of the offer — 'All days' follows the event's dates automatically when they shift">Days</label>
+                                <select value={offerVal(t, 'day_scope')} onChange={(e) => setOfferVal(t, 'day_scope', e.target.value)}>
+                                  <option value="">No ticket default — plain yes/no guest</option>
+                                  <option value="all">All days — every event day</option>
+                                  <option value="single">One day — picked per guest</option>
+                                  <option value="choose">Guest chooses — spends a total across days</option>
+                                  <option value="specific">Specific dates — set below</option>
+                                </select>
+                              </div>
+                              {['all', 'single', 'choose'].includes(offerVal(t, 'day_scope')) && (
+                                <div className="field" style={{ width: 100 }}>
+                                  <label title="Tickets per day">Tickets</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    placeholder="e.g. 2"
+                                    value={offerVal(t, 'default_ticket_count')}
+                                    onChange={(e) => setOfferVal(t, 'default_ticket_count', e.target.value)}
+                                  />
+                                </div>
+                              )}
+                              {offerVal(t, 'day_scope') !== '' && (
+                                <div className="field" style={{ width: 100 }}>
+                                  <label title="The across-days cap stamped on each added guest. Lower than the day amounts = their RSVP becomes a chooser. Blank = fixed offer.">
+                                    Total (cap)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    placeholder="all"
+                                    value={offerVal(t, 'default_spend_total')}
+                                    onChange={(e) => setOfferVal(t, 'default_spend_total', e.target.value)}
+                                  />
+                                </div>
+                              )}
+                              <div className="field">
+                                <label title="Default for new guests of this type — when their tickets are pulled from sellable inventory">Pull</label>
+                                <select value={offerVal(t, 'default_hold_timing')} onChange={(e) => setOfferVal(t, 'default_hold_timing', e.target.value)}>
+                                  <option value="">Now (default)</option>
+                                  <option value="now">Now</option>
+                                  <option value="on_confirm">On RSVP yes</option>
+                                  <option value="later">Later</option>
+                                </select>
+                              </div>
+                              <button
+                                className="btn btn-primary btn-sm"
+                                disabled={savingOfferId === t.id || !offerDirty(t)}
+                                onClick={() => saveOffer(t)}
+                              >
+                                {savingOfferId === t.id ? 'Saving…' : 'Save offer'}
+                              </button>
+                            </div>
+
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                               Seating priority — tried in order, top first
                             </div>
@@ -463,7 +508,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                     }}
                                   >
                                     <span>
-                                      {categoryName(p.seating_category_id)}
+                                      {familyName(p.seating_category_id)}
                                       {p.section_label && !p.allowed_sections && (
                                         <span style={{ color: 'var(--text-muted)' }}> · Section {p.section_label}</span>
                                       )}
@@ -491,16 +536,16 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                 onChange={(e) => setAddPriorityCategoryId(e.target.value)}
                               >
                                 <option value="">Choose a category to add…</option>
-                                {categories
+                                {familyCategories
                                   .filter((c) => {
                                     const entries = priorityLists[t.id] || []
                                     // a pool with sections can appear once per section
                                     // (plus once pool-wide); a plain pool only once
                                     if ((c.sections || []).length > 0) {
-                                      const used = entries.filter((p) => p.seating_category_id === c.id)
+                                      const used = entries.filter((p) => familyName(p.seating_category_id) === c.name)
                                       return used.length < new Set((c.sections || []).map((s) => s.section_label)).size + 1
                                     }
-                                    return !entries.some((p) => p.seating_category_id === c.id)
+                                    return !entries.some((p) => familyName(p.seating_category_id) === c.name)
                                   })
                                   .map((c) => (
                                     <option key={c.id} value={c.id}>
@@ -583,12 +628,13 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               marginTop: 12,
                             }}
                           >
+                            {offerVal(t, 'day_scope') === 'specific' && (
+                            <>
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              Ticket allotment — the DAY CAPS for a guest of this type, plus the TOTAL
-                              across days{t.default_spend_total ? ` (currently ${t.default_spend_total} — set via Edit)` : ' (none set — Edit the type to add one)'}.
-                              A total lower than the day amounts turns the guest&apos;s RSVP into a chooser
-                              (&ldquo;place your {t.default_spend_total || 'N'} across these caps&rdquo;).
-                              Leave everything empty for an ordinary yes/no guest. Overridable per guest.
+                              Specific dates — the exact days and amounts a &ldquo;{offerVal(t, 'name') || t.name}&rdquo;
+                              is offered. With a Total (cap) above that&apos;s lower than these amounts, the
+                              guest&apos;s RSVP becomes a chooser (&ldquo;place your {t.default_spend_total || 'N'} across
+                              these caps&rdquo;). Overridable per guest.
                             </div>
 
                             {!ticketAllotments[t.id] ? (
@@ -667,6 +713,8 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               Setting a date that's already listed updates its quantity instead of adding a
                               duplicate.
                             </p>
+                            </>
+                            )}
                           </div>
                         </td>
                       </tr>
