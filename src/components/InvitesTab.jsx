@@ -111,6 +111,10 @@ export default function InvitesTab({ onToast, eventId }) {
   // best-effort so untouched day cells can GHOST what the backend will
   // actually grant (effective_allotment inherits these rows).
   const [typeAllotments, setTypeAllotments] = useState({})
+  // Two views: 'tosend' = setting up (add/import + everyone not yet
+  // sent); 'sent' = tracking (only people whose invite went out, plus
+  // the request/seating queues). Sending moves people across.
+  const [view, setView] = useState('tosend')
   const guestEventDays = (() => {
     const s = guestEventSettings
     if (!s || !s.first_day || !s.last_day || !['per_day', 'mixed', 'multi_day'].includes(s.ticket_span)) return []
@@ -388,6 +392,7 @@ export default function InvitesTab({ onToast, eventId }) {
       )
       onToast(parts.join(' · '), res.failed > 0)
       loadEventData(loadedEventId)
+      if (res.sent > 0) setView('sent')
     } catch (err) {
       onToast(err.message, true)
     } finally {
@@ -840,7 +845,10 @@ export default function InvitesTab({ onToast, eventId }) {
     (g) => !g.allocated_by_guest_id && (g.effective_mode || 'invite') !== 'distribute'
   )
   const elsewhereCount = (guests || []).length - invitees.length
+  const unsentCount = invitees.filter((g) => !g.link_sent_at).length
+  const sentCount = invitees.length - unsentCount
   const visibleGuests = invitees.filter((g) => {
+    if (view === 'tosend' ? g.link_sent_at : !g.link_sent_at) return false
     if (filterType && g.guest_type_id !== filterType) return false
     if (filterStatus && g.allocation_status !== filterStatus) return false
     if (filterDay && g.visit_date !== filterDay) return false
@@ -866,6 +874,23 @@ export default function InvitesTab({ onToast, eventId }) {
       <div className="page-title">Invites</div>
       <p className="page-subtitle">Direct offers to named guests who answer for themselves — celebrities, press, VIPs. Grant per-day tickets, track RSVPs and requests, assign seats. Sponsors and other ticket hand-outs live on the Allotments page; the full door roster is on Guest list.</p>
 
+      <div style={{ display: 'flex', gap: 8, margin: '0 0 16px' }}>
+        <button
+          className={`btn ${view === 'tosend' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setView('tosend')}
+          title="Add people and get their offers right — nothing here has been emailed yet"
+        >
+          Set up &amp; send{unsentCount ? ` (${unsentCount})` : ''}
+        </button>
+        <button
+          className={`btn ${view === 'sent' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setView('sent')}
+          title="Everyone whose invite went out — track answers, requests, and seats"
+        >
+          Track sent{sentCount ? ` (${sentCount})` : ''}
+        </button>
+      </div>
+
 
       {loadedEventId && categories !== null && guests !== null && (
         <>
@@ -879,6 +904,8 @@ export default function InvitesTab({ onToast, eventId }) {
           )}
 
           {/* ---------- Add a single guest ---------- */}
+          {view === 'tosend' && (
+          <>
           <div className="panel">
             <div className="panel-title">Add people</div>
             <form className="inline-form" onSubmit={handleCreateGuest}>
@@ -1077,8 +1104,11 @@ export default function InvitesTab({ onToast, eventId }) {
             </div>
           )}
 
+          </>
+          )}
+
           {/* ---------- Master guest list — filter, search, export ---------- */}
-          {(guests || []).some((g) => g.needs_seating) && (
+          {view === 'sent' && (guests || []).some((g) => g.needs_seating) && (
             <div className="panel" style={{ borderColor: 'var(--danger, #c55)' }}>
               <div className="panel-title">Needs seating</div>
               <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
@@ -1116,7 +1146,7 @@ export default function InvitesTab({ onToast, eventId }) {
             </div>
           )}
 
-          {ticketRequests.some((r) => r.status === 'pending') && (
+          {view === 'sent' && ticketRequests.some((r) => r.status === 'pending') && (
             <div className="panel">
               <div className="panel-title">Ticket requests</div>
               <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
@@ -1211,20 +1241,23 @@ export default function InvitesTab({ onToast, eventId }) {
               >
                 {savingGrid && !committing ? 'Saving…' : `Save changes${dirtyIds.length ? ` (${dirtyIds.length})` : ''}`}
               </button>
-              <button
-                className="btn btn-primary"
-                disabled={committing || savingGrid}
-                onClick={saveAndSendInvites}
-                title="Save every row edit, then email every invitee who hasn't received their link"
-              >
-                {committing ? 'Sending…' : 'Save & send invites'}
-              </button>
+              {view === 'tosend' && (
+                <button
+                  className="btn btn-primary"
+                  disabled={committing || savingGrid}
+                  onClick={saveAndSendInvites}
+                  title="Save every row edit, then email every invitee who hasn't received their link"
+                >
+                  {committing ? 'Sending…' : 'Save & send invites'}
+                </button>
+              )}
               <button className="btn btn-secondary" onClick={handleExportGuests}>
                 Download CSV
               </button>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
-              Showing {visibleGuests.length} of {invitees.length} invitee{invitees.length === 1 ? '' : 's'}
+              Showing {visibleGuests.length} of {view === 'tosend' ? unsentCount : sentCount}{' '}
+              {view === 'tosend' ? 'not-yet-sent' : 'sent'} invitee{(view === 'tosend' ? unsentCount : sentCount) === 1 ? '' : 's'}
               {elsewhereCount > 0 &&
                 ` · ${elsewhereCount} other guest${elsewhereCount === 1 ? ' lives' : 's live'} on Allotments and Guest list`}
             </p>
@@ -1247,10 +1280,14 @@ export default function InvitesTab({ onToast, eventId }) {
               {visibleGuests.length === 0 ? (
                 <tr>
                   <td colSpan={inviteColCount} className="empty-state">
-                    {invitees.length === 0
-                      ? guests.length === 0
-                        ? 'No guests yet — add people above.'
-                        : 'No direct invitees yet — add people above. Allotment holders and their recipients live on the Allotments page.'
+                    {(view === 'tosend' ? unsentCount : sentCount) === 0
+                      ? view === 'tosend'
+                        ? guests.length === 0
+                          ? 'No guests yet — add people above.'
+                          : sentCount > 0
+                            ? 'Everyone here has been sent their invite — they live on Track sent now.'
+                            : 'No direct invitees yet — add people above. Allotment holders and their recipients live on the Allotments page.'
+                        : 'No invites sent yet — set people up and hit Save & send on the Set up & send view.'
                       : 'No invitees match the current filters.'}
                   </td>
                 </tr>
