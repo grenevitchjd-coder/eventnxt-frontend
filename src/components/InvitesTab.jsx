@@ -800,9 +800,10 @@ export default function InvitesTab({ onToast, eventId }) {
   })
 
   // Two-row layout: the thead labels only the OFFER row (Name spans both
-  // rows). Name + Type + Seating + day columns + Total + Pull. Party is
-  // derived from the day amounts on save, not shown.
-  const inviteColCount = 5 + guestEventDays.length - (externalTicketing ? 1 : 0)
+  // rows). Name + Seating + day columns + Total + Pull; Type leads the
+  // lifecycle strip below. Party is derived from the day amounts on
+  // save, not shown.
+  const inviteColCount = 4 + guestEventDays.length - (externalTicketing ? 1 : 0)
 
   return (
     <>
@@ -1178,7 +1179,6 @@ export default function InvitesTab({ onToast, eventId }) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Type</th>
                 <th>Seating</th>
                 {guestEventDays.map((d) => (
                   <th key={d} style={{ textAlign: 'center' }}>{fmtGuestDay(d)}</th>
@@ -1244,19 +1244,6 @@ export default function InvitesTab({ onToast, eventId }) {
                               📝
                             </span>
                           )}
-                        </td>
-                        <td>
-                          <select
-                            style={selectStyle}
-                            value={gridVal(g, 'guest_type_id')}
-                            onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
-                          >
-                            {guestTypes.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
                         </td>
                         <td>
                           <select
@@ -1341,6 +1328,20 @@ export default function InvitesTab({ onToast, eventId }) {
                       <tr className="invite-meta">
                         <td colSpan={inviteColCount - 1}>
                         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                        <div>
+                          <span className="meta-label">Type</span>
+                          <select
+                            style={selectStyle}
+                            value={gridVal(g, 'guest_type_id')}
+                            onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
+                          >
+                            {guestTypes.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         <div style={{ fontSize: 12, minWidth: 90 }}>
                           <span className="meta-label">Progress</span>
                           {g.rsvp_confirmed && <span>RSVP: {g.rsvp_confirmed}</span>}
