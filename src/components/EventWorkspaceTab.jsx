@@ -441,13 +441,13 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                 </select>
                               </div>
                               {eventDays.map((iso) => (
-                                <div className="field" key={iso} style={{ width: 86 }}>
+                                <div className="field" key={iso} style={{ width: 92 }}>
                                   <label title="Tickets offered for this night — 0 excludes it">{fmtDay(iso)}</label>
                                   <input
                                     type="number"
                                     min={0}
                                     placeholder="0"
-                                    style={{ textAlign: 'center' }}
+                                    style={{ width: '100%', minWidth: 0, textAlign: 'center' }}
                                     value={offerVal(t, `day:${iso}`)}
                                     onChange={(e) => setOfferVal(t, `day:${iso}`, e.target.value)}
                                   />
@@ -466,6 +466,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                   type="number"
                                   min={1}
                                   placeholder="all"
+                                  style={{ width: '100%', minWidth: 0, textAlign: 'center' }}
                                   value={offerVal(t, 'default_spend_total')}
                                   onChange={(e) => setOfferVal(t, 'default_spend_total', e.target.value)}
                                 />
