@@ -40,6 +40,14 @@ export default function AllotmentsTab({ onToast, eventId }) {
 
   const fileInputRef = useRef(null)
   const [importing, setImporting] = useState(false)
+  // Two views, matching the Invites page: 'tosend' = staging (add/import
+  // + every allotment whose portal link hasn't gone out); 'sent' =
+  // tracking portals that are live. Sending moves people across.
+  const [view, setView] = useState('tosend')
+  // Per-type default budgets ({guest_type_id: {date: qty}}) so untouched
+  // budget cells ghost what the backend will grant (same rules as the
+  // Invites grid: ghosts materialize on save, silence after override).
+  const [typeAllotments, setTypeAllotments] = useState({})
 
   const loadEventData = async (evId) => {
     try {
@@ -59,6 +67,16 @@ export default function AllotmentsTab({ onToast, eventId }) {
       const typeIds = [...new Set(
         g.filter((x) => !x.allocated_by_guest_id && (x.effective_mode || 'invite') === 'distribute').map((x) => x.guest_type_id)
       )]
+      Promise.all(
+        gt.map(async (t) => {
+          try {
+            const rows = await api.listTicketAllotments(evId, t.id)
+            return [t.id, Object.fromEntries(rows.map((r) => [r.date, r.quantity]))]
+          } catch {
+            return [t.id, {}]
+          }
+        })
+      ).then((es) => setTypeAllotments(Object.fromEntries(es)))
       const entries = await Promise.all(
         typeIds.map(async (id) => {
           try {
@@ -101,6 +119,27 @@ export default function AllotmentsTab({ onToast, eventId }) {
     (g) => !g.allocated_by_guest_id && (g.effective_mode || 'invite') === 'distribute'
   )
   const recipientsOf = (id) => (guests || []).filter((g) => g.allocated_by_guest_id === id)
+
+  const unsentCount = distributors.filter((g) => !g.link_sent_at).length
+  const sentCount = distributors.length - unsentCount
+  const viewDistributors = distributors.filter((g) => (view === 'tosend' ? !g.link_sent_at : !!g.link_sent_at))
+
+  // Type-default ghosts — identical semantics to the Invites grid.
+  const typeShapeCount = (g) => {
+    const t = guestTypes.find((x) => x.id === (gridVal(g, 'guest_type_id') || g.guest_type_id))
+    return t && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count ? t.default_ticket_count : null
+  }
+  const typeDayDefault = (g, d) => {
+    const shape = typeShapeCount(g)
+    if (shape) return shape
+    const rows = typeAllotments[gridVal(g, 'guest_type_id') || g.guest_type_id]
+    return rows && rows[d] ? rows[d] : null
+  }
+  const typeDayGhost = (g, d) => (g.ticket_allotment_overridden ? null : typeDayDefault(g, d))
+  const typeTotalGhost = (g) => {
+    const t = guestTypes.find((x) => x.id === (gridVal(g, 'guest_type_id') || g.guest_type_id))
+    return t && t.default_spend_total ? t.default_spend_total : null
+  }
 
   // ---------- Grid editing ----------
 
@@ -148,7 +187,16 @@ export default function AllotmentsTab({ onToast, eventId }) {
     let ticket_allotment = null
     if (touchedDays) {
       ticket_allotment = budgetCols
-        .map((d) => ({ date: d || null, quantity: parseInt(gridVal(g, `day:${d}`), 10) || 0 }))
+        .map((d) => {
+          const raw = String(gridVal(g, `day:${d}`))
+          const quantity =
+            raw !== ''
+              ? parseInt(raw, 10) || 0
+              : g.ticket_allotment_overridden
+                ? 0
+                : typeDayDefault(g, d) || 0
+          return { date: d || null, quantity }
+        })
         .filter((r) => r.quantity > 0)
     }
     return {
@@ -206,6 +254,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
       )
       onToast(parts.join(' · '), res.failed > 0)
       loadEventData(loadedEventId)
+      if (res.sent > 0) setView('sent')
     } catch (err) {
       onToast(err.message, true)
     } finally {
@@ -399,6 +448,24 @@ export default function AllotmentsTab({ onToast, eventId }) {
           ' This event sells externally: order the real tickets on your platform and mark each recipient once sent.'}
       </p>
 
+      <div style={{ display: 'flex', gap: 8, margin: '0 0 16px' }}>
+        <button
+          className={`btn ${view === 'tosend' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setView('tosend')}
+          title="Add entities and set budgets — no portal links emailed yet"
+        >
+          Set up &amp; send{unsentCount ? ` (${unsentCount})` : ''}
+        </button>
+        <button
+          className={`btn ${view === 'sent' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setView('sent')}
+          title="Live portals — track budgets given out and recipients as they come in"
+        >
+          Track sent{sentCount ? ` (${sentCount})` : ''}
+        </button>
+      </div>
+
+      {view === 'tosend' && (
       <div className="panel">
         <div className="panel-title">Add allotments</div>
         <form className="inline-form" onSubmit={handleCreate}>
@@ -441,9 +508,11 @@ export default function AllotmentsTab({ onToast, eventId }) {
         </p>
       </div>
 
+      )}
+
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-          {distributors.length} allotment{distributors.length === 1 ? '' : 's'}
+          {viewDistributors.length} {view === 'tosend' ? 'not-yet-sent' : 'live'} allotment{viewDistributors.length === 1 ? '' : 's'}
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -457,14 +526,16 @@ export default function AllotmentsTab({ onToast, eventId }) {
         >
           {savingGrid && !committing ? 'Saving…' : `Save changes${dirtyIds.length ? ` (${dirtyIds.length})` : ''}`}
         </button>
-        <button
-          className="btn btn-primary"
-          disabled={committing || savingGrid}
-          onClick={saveAndSendPortalLinks}
-          title="Save every edit, then email every allotment that hasn't received its portal link"
-        >
-          {committing ? 'Sending…' : 'Save & send portal links'}
-        </button>
+        {view === 'tosend' && (
+          <button
+            className="btn btn-primary"
+            disabled={committing || savingGrid}
+            onClick={saveAndSendPortalLinks}
+            title="Save every edit, then email every allotment that hasn't received its portal link"
+          >
+            {committing ? 'Sending…' : 'Save & send portal links'}
+          </button>
+        )}
       </div>
 
       <div className="table-scroll" style={{ marginBottom: 28 }}>
@@ -489,14 +560,18 @@ export default function AllotmentsTab({ onToast, eventId }) {
           </tr>
         </thead>
         <tbody>
-          {distributors.length === 0 ? (
+          {viewDistributors.length === 0 ? (
             <tr>
               <td colSpan={colCount} className="empty-state">
-                No allotments yet — add one above. You set the budget; they choose who gets the tickets.
+                {view === 'tosend'
+                  ? sentCount > 0
+                    ? 'Every allotment has its portal link — they live on Track sent now.'
+                    : 'No allotments yet — add one above. You set the budget; they choose who gets the tickets.'
+                  : 'No portal links sent yet — set budgets and hit Save & send on the Set up & send view.'}
               </td>
             </tr>
           ) : (
-            distributors.map((g) => {
+            viewDistributors.map((g) => {
               const kids = recipientsOf(g.id)
               const summary = seatingSummary(g)
               return (
@@ -540,7 +615,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
                         <input
                           type="number"
                           min={0}
-                          placeholder="—"
+                          placeholder={typeDayGhost(g, d) ? String(typeDayGhost(g, d)) : '—'}
                           title="Tickets they can hand out for this day"
                           style={{ ...selectStyle, width: 52, textAlign: 'center' }}
                           value={gridVal(g, `day:${d}`)}
@@ -552,7 +627,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
                       <input
                         type="number"
                         min={1}
-                        placeholder="all"
+                        placeholder={typeTotalGhost(g) ? String(typeTotalGhost(g)) : 'all'}
                         title="Blank = the day budgets stand alone. A number lower than their sum caps the whole allotment."
                         style={{ ...selectStyle, width: 56, textAlign: 'center' }}
                         value={gridVal(g, 'spend_total')}
