@@ -793,7 +793,8 @@ export default function AllotmentsTab({ onToast, eventId }) {
                         {kids.length === 0 ? (
                           <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0' }}>
                             No recipients yet — they appear here the moment {g.name} enters them in the
-                            portal, and each is emailed their own confirm link automatically.
+                            portal, and each is emailed their tickets automatically — no RSVP
+                            needed on their end.
                           </p>
                         ) : (
                           <table className="data-table" style={{ margin: '6px 0' }}>

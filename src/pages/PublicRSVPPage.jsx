@@ -599,11 +599,11 @@ export default function PublicRSVPPage() {
                     <td className="mono">{r.party_size}</td>
                     <td>
                       <span className={`pill pill-${r.allocation_status}`}>
-                        {r.rsvp_confirmed === 'yes'
-                          ? 'confirmed'
-                          : r.rsvp_confirmed === 'no'
-                            ? 'declined'
-                            : 'no answer yet'}
+                        {r.allocation_status === 'confirmed'
+                          ? 'tickets sent'
+                          : r.allocation_status === 'declined'
+                            ? 'removed'
+                            : 'awaiting seats'}
                       </span>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
