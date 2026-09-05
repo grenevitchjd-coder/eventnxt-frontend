@@ -38,11 +38,12 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   const [addingPriority, setAddingPriority] = useState(false)
   // Ticket allotment defaults (per-day), edited inline in the accordion
   const [ticketAllotments, setTicketAllotments] = useState({}) // guestTypeId -> [{date, quantity}]
-  const [newAllotmentDay, setNewAllotmentDay] = useState({ date: '', quantity: '' })
-  const [savingAllotmentDay, setSavingAllotmentDay] = useState(false)
+
+  const [eventSettings, setEventSettings] = useState(null)
 
   const loadEventData = (id) => {
     setCategories(null)
+    api.getEventSettings(id).then(setEventSettings).catch(() => {})
     Promise.all([api.listSeatingCategories(id), api.listGuestTypes(id)])
       .then(([cats, types]) => {
         setCategories(cats)
@@ -79,6 +80,22 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   }, [])
 
 
+  // The event's current days — the day cells in every offer editor come
+  // from HERE, so what you see is always this event's real nights.
+  const eventDays = (() => {
+    const s = eventSettings
+    if (!s || !s.first_day || !s.last_day || !['per_day', 'mixed', 'multi_day'].includes(s.ticket_span)) return []
+    const out = []
+    const d = new Date(s.first_day + 'T12:00:00')
+    const last = new Date(s.last_day + 'T12:00:00')
+    while (d <= last && out.length < 60) {
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+      d.setDate(d.getDate() + 1)
+    }
+    return out
+  })()
+  const fmtDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+
   // ---------- Guest types + priority seating ----------
 
   const handleCreateType = async (e) => {
@@ -106,11 +123,17 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   const offerVal = (t, field) => {
     const d = offerDrafts[t.id] || {}
     if (field in d) return d[field]
-    if (field === 'day_scope') {
-      // legacy types with explicit date rows but no scope open as
-      // 'specific' so their rows are visible and editable
-      if (t.day_scope) return t.day_scope
-      return (ticketAllotments[t.id] || []).length > 0 ? 'specific' : ''
+    if (field.startsWith('day:')) {
+      // Seed a day cell from the type's explicit row for that day; a
+      // legacy shape type ('all'/'choose' + count, no rows) seeds every
+      // cell with its count so saving converts it to plain rows.
+      const iso = field.slice(4)
+      const rows = ticketAllotments[t.id] || []
+      const row = rows.find((r) => r.date === iso)
+      if (row) return String(row.quantity)
+      if (rows.length === 0 && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count)
+        return String(t.default_ticket_count)
+      return ''
     }
     const v = t[field]
     return v === null || v === undefined ? '' : String(v)
@@ -122,30 +145,29 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
   const offerDirty = (t) => Object.keys(offerDrafts[t.id] || {}).length > 0
 
   const saveOffer = async (t) => {
-    const scope = offerVal(t, 'day_scope')
-    const rows = ticketAllotments[t.id] || []
-    if (scope !== 'specific' && rows.length > 0) {
-      const ok = window.confirm(
-        `"${t.name}" has ${rows.length} specific date row${rows.length === 1 ? '' : 's'}. ` +
-          'Saving with a different Days setting removes them (the new setting takes over). Continue?'
-      )
-      if (!ok) return
-    }
     setSavingOfferId(t.id)
     try {
-      if (scope !== 'specific' && rows.length > 0) {
-        for (const r of rows) await api.deleteTicketAllotmentDay(loadedEventId, t.id, r.date)
-        setTicketAllotments((prev) => ({ ...prev, [t.id]: [] }))
+      const rows = ticketAllotments[t.id] || []
+      const byDate = Object.fromEntries(rows.map((r) => [r.date, r.quantity]))
+      for (const iso of eventDays) {
+        const n = parseInt(offerVal(t, `day:${iso}`), 10) || 0
+        if (n > 0 && byDate[iso] !== n) await api.upsertTicketAllotmentDay(loadedEventId, t.id, iso, n)
+        if (n === 0 && byDate[iso] !== undefined) await api.deleteTicketAllotmentDay(loadedEventId, t.id, iso)
       }
       await api.updateGuestType(loadedEventId, t.id, {
         name: offerVal(t, 'name') || t.name,
         guest_mode: offerVal(t, 'guest_mode') || null,
-        day_scope: scope === 'specific' ? 'specific' : scope || null,
-        default_ticket_count: parseInt(offerVal(t, 'default_ticket_count'), 10) || null,
+        // The offer IS the day rows now — shape scopes retire on save so
+        // one system drives everything (rows win in the backend anyway).
+        day_scope: null,
+        default_ticket_count: null,
         default_hold_timing: offerVal(t, 'default_hold_timing') || null,
         default_spend_total: parseInt(offerVal(t, 'default_spend_total'), 10) || null,
       })
-      onToast(`"${offerVal(t, 'name') || t.name}" saved — newly added guests get these defaults`)
+      const total = parseInt(offerVal(t, 'default_spend_total'), 10)
+      onToast(
+        `"${offerVal(t, 'name') || t.name}" saved${total ? ` — ${total} across the day amounts, chooser when lower` : ''} — newly added guests get these defaults`
+      )
       setOfferDrafts((prev) => ({ ...prev, [t.id]: {} }))
       loadEventData(loadedEventId)
       setTimeout(() => toggleExpandType(t.id), 0)
@@ -155,6 +177,10 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
       setSavingOfferId(null)
     }
   }
+
+  // Rows pointing at dates no longer in the event (the event moved):
+  // surfaced with one-click removal instead of silently granting nothing.
+  const staleRows = (t) => (ticketAllotments[t.id] || []).filter((r) => !eventDays.includes(r.date))
 
   const deleteType = async (type) => {
     if (!window.confirm(`Delete "${type.name}"?`)) return
@@ -175,7 +201,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
     setExpandedTypeId(typeId)
     setAddPriorityCategoryId('')
     setAddPrioritySection('')
-    setNewAllotmentDay({ date: '', quantity: '' })
     if (!priorityLists[typeId]) {
       api
         .listSeatingPriorities(loadedEventId, typeId)
@@ -187,27 +212,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
         .listTicketAllotments(loadedEventId, typeId)
         .then((list) => setTicketAllotments({ ...ticketAllotments, [typeId]: list }))
         .catch((e) => onToast(e.message, true))
-    }
-  }
-
-  const handleSaveAllotmentDay = async (typeId) => {
-    if (!newAllotmentDay.date || newAllotmentDay.quantity === '') return
-    setSavingAllotmentDay(true)
-    try {
-      await api.upsertTicketAllotmentDay(
-        loadedEventId,
-        typeId,
-        newAllotmentDay.date,
-        Number(newAllotmentDay.quantity)
-      )
-      const updated = await api.listTicketAllotments(loadedEventId, typeId)
-      setTicketAllotments({ ...ticketAllotments, [typeId]: updated })
-      setNewAllotmentDay({ date: '', quantity: '' })
-      onToast('Ticket allotment saved')
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setSavingAllotmentDay(false)
     }
   }
 
@@ -322,9 +326,8 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                   value={typeForm.guest_mode}
                   onChange={(e) => setTypeForm({ ...typeForm, guest_mode: e.target.value })}
                 >
-                  <option value="invite">Guest invite — RSVPs for themselves (Invites page)</option>
-                  <option value="select">Guest invite — picks their own days (Invites page)</option>
-                  <option value="distribute">Allotment — hands tickets out to their people (Allotments page)</option>
+                  <option value="invite">Invite — they RSVP for themselves (Invites page)</option>
+                  <option value="distribute">Allotment — they hand tickets out (Allotments page)</option>
                 </select>
               </div>
               <button className="btn btn-secondary" type="submit" disabled={creatingType}>
@@ -381,10 +384,14 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                           <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                             {[
                               { invite: 'Invite', select: 'Invite (picks days)', distribute: 'Allotment' }[t.guest_mode] || 'Invite',
-                              { all: 'all days', single: 'one day per guest', choose: 'guest chooses', specific: 'specific dates' }[
-                                t.day_scope || ((ticketAllotments[t.id] || []).length > 0 ? 'specific' : '')
-                              ] || 'no ticket default',
-                              t.default_ticket_count ? `${t.default_ticket_count}/day` : null,
+                              eventDays.length > 0
+                                ? (() => {
+                                    const byDate = Object.fromEntries((ticketAllotments[t.id] || []).map((r) => [r.date, r.quantity]))
+                                    const shape = (ticketAllotments[t.id] || []).length === 0 && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count
+                                    const cells = eventDays.map((d) => (shape ? t.default_ticket_count : byDate[d] || 0))
+                                    return cells.some((n) => n > 0) ? cells.join('·') + ' per night' : 'no tickets'
+                                  })()
+                                : null,
                               t.default_spend_total ? `cap ${t.default_spend_total}` : null,
                             ]
                               .filter(Boolean)
@@ -413,59 +420,56 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                             }}
                           >
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              The offer — what a &ldquo;{offerVal(t, 'name') || t.name}&rdquo; gets when added.
-                              Days and amounts here are defaults; both stay overridable per guest.
+                              The offer — what a &ldquo;{offerVal(t, 'name') || t.name}&rdquo; gets when added:
+                              tickets per night below, and the Total (cap) across nights. A total LOWER
+                              than the night amounts turns their RSVP into a chooser (&ldquo;place your N
+                              across these&rdquo;). Zero a night to exclude it. All of it stays overridable
+                              per guest on the Invites page.
                             </div>
-                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 8 }}>
                               <div className="field" style={{ minWidth: 150 }}>
                                 <label>Name</label>
                                 <input value={offerVal(t, 'name') || t.name} onChange={(e) => setOfferVal(t, 'name', e.target.value)} />
                               </div>
                               <div className="field">
-                                <label title="Which page guests of this type live on, and which flow they get">Offering type</label>
+                                <label title="Which page guests of this type live on: Invites (they RSVP for themselves) or Allotments (they hand tickets out)">Offering type</label>
                                 <select value={offerVal(t, 'guest_mode')} onChange={(e) => setOfferVal(t, 'guest_mode', e.target.value)}>
-                                  <option value="invite">Guest invite — RSVPs for themselves</option>
-                                  <option value="select">Guest invite — picks their own days</option>
-                                  <option value="distribute">Allotment — hands tickets out</option>
+                                  <option value="invite">Invite</option>
+                                  <option value="distribute">Allotment</option>
+                                  {offerVal(t, 'guest_mode') === 'select' && <option value="select">Invite — picks days (legacy)</option>}
                                   {offerVal(t, 'guest_mode') === '' && <option value="">Auto (legacy — retired)</option>}
                                 </select>
                               </div>
-                              <div className="field">
-                                <label title="The SHAPE of the offer — 'All days' follows the event's dates automatically when they shift">Days</label>
-                                <select value={offerVal(t, 'day_scope')} onChange={(e) => setOfferVal(t, 'day_scope', e.target.value)}>
-                                  <option value="">No ticket default — plain yes/no guest</option>
-                                  <option value="all">All days — every event day</option>
-                                  <option value="single">One day — picked per guest</option>
-                                  <option value="choose">Guest chooses — spends a total across days</option>
-                                  <option value="specific">Specific dates — set below</option>
-                                </select>
+                              {eventDays.map((iso) => (
+                                <div className="field" key={iso} style={{ width: 86 }}>
+                                  <label title="Tickets offered for this night — 0 excludes it">{fmtDay(iso)}</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="0"
+                                    style={{ textAlign: 'center' }}
+                                    value={offerVal(t, `day:${iso}`)}
+                                    onChange={(e) => setOfferVal(t, `day:${iso}`, e.target.value)}
+                                  />
+                                </div>
+                              ))}
+                              {eventDays.length === 0 && (
+                                <span style={{ fontSize: 12, color: 'var(--text-muted)', paddingBottom: 8 }}>
+                                  Night-by-night amounts appear once the event has per-day ticketing.
+                                </span>
+                              )}
+                              <div className="field" style={{ width: 100 }}>
+                                <label title="The across-nights cap stamped on each added guest. Lower than the night amounts = their RSVP becomes a chooser. Blank = fixed offer.">
+                                  Total (cap)
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  placeholder="all"
+                                  value={offerVal(t, 'default_spend_total')}
+                                  onChange={(e) => setOfferVal(t, 'default_spend_total', e.target.value)}
+                                />
                               </div>
-                              {['all', 'single', 'choose'].includes(offerVal(t, 'day_scope')) && (
-                                <div className="field" style={{ width: 100 }}>
-                                  <label title="Tickets per day">Tickets</label>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    placeholder="e.g. 2"
-                                    value={offerVal(t, 'default_ticket_count')}
-                                    onChange={(e) => setOfferVal(t, 'default_ticket_count', e.target.value)}
-                                  />
-                                </div>
-                              )}
-                              {offerVal(t, 'day_scope') !== '' && (
-                                <div className="field" style={{ width: 100 }}>
-                                  <label title="The across-days cap stamped on each added guest. Lower than the day amounts = their RSVP becomes a chooser. Blank = fixed offer.">
-                                    Total (cap)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    placeholder="all"
-                                    value={offerVal(t, 'default_spend_total')}
-                                    onChange={(e) => setOfferVal(t, 'default_spend_total', e.target.value)}
-                                  />
-                                </div>
-                              )}
                               <div className="field">
                                 <label title="Default for new guests of this type — when their tickets are pulled from sellable inventory">Pull</label>
                                 <select value={offerVal(t, 'default_hold_timing')} onChange={(e) => setOfferVal(t, 'default_hold_timing', e.target.value)}>
@@ -483,6 +487,22 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                                 {savingOfferId === t.id ? 'Saving…' : 'Save offer'}
                               </button>
                             </div>
+                            {staleRows(t).length > 0 && (
+                              <div style={{ fontSize: 12.5, marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(224, 122, 47, 0.10)', color: '#a2561c' }}>
+                                The event&apos;s dates moved — these amounts point at days no longer in the event:
+                                {staleRows(t).map((r) => (
+                                  <button
+                                    key={r.date}
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ marginLeft: 8 }}
+                                    onClick={() => handleDeleteAllotmentDay(t.id, r.date)}
+                                    title="Remove this out-of-event amount"
+                                  >
+                                    {r.date}: {r.quantity} ✕
+                                  </button>
+                                ))}
+                              </div>
+                            )}
 
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
                               Seating priority — tried in order, top first
@@ -628,93 +648,6 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               marginTop: 12,
                             }}
                           >
-                            {offerVal(t, 'day_scope') === 'specific' && (
-                            <>
-                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              Specific dates — the exact days and amounts a &ldquo;{offerVal(t, 'name') || t.name}&rdquo;
-                              is offered. With a Total (cap) above that&apos;s lower than these amounts, the
-                              guest&apos;s RSVP becomes a chooser (&ldquo;place your {t.default_spend_total || 'N'} across
-                              these caps&rdquo;). Overridable per guest.
-                            </div>
-
-                            {!ticketAllotments[t.id] ? (
-                              <p style={{ fontSize: 13 }}>Loading…</p>
-                            ) : ticketAllotments[t.id].length === 0 ? (
-                              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
-                                No ticket allotment set — guests of this type have nothing to distribute.
-                              </p>
-                            ) : (
-                              <table
-                                style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}
-                              >
-                                <thead>
-                                  <tr>
-                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
-                                      Date
-                                    </th>
-                                    <th style={{ textAlign: 'left', fontSize: 11.5, color: 'var(--text-muted)', paddingBottom: 4 }}>
-                                      Tickets
-                                    </th>
-                                    <th></th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {[...ticketAllotments[t.id]]
-                                    .sort((a, b) => a.date.localeCompare(b.date))
-                                    .map((row) => (
-                                      <tr key={row.date}>
-                                        <td style={{ fontSize: 13.5, padding: '4px 0' }}>{row.date}</td>
-                                        <td style={{ fontSize: 13.5, padding: '4px 0' }} className="mono">
-                                          {row.quantity}
-                                        </td>
-                                        <td style={{ textAlign: 'right' }}>
-                                          <button
-                                            className="btn btn-danger btn-sm"
-                                            onClick={() => handleDeleteAllotmentDay(t.id, row.date)}
-                                          >
-                                            Remove
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                </tbody>
-                              </table>
-                            )}
-
-                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                              <div className="field" style={{ width: 170 }}>
-                                <label>Date</label>
-                                <input
-                                  type="date"
-                                  value={newAllotmentDay.date}
-                                  onChange={(e) => setNewAllotmentDay({ ...newAllotmentDay, date: e.target.value })}
-                                />
-                              </div>
-                              <div className="field" style={{ width: 110 }}>
-                                <label>Tickets</label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={newAllotmentDay.quantity}
-                                  onChange={(e) =>
-                                    setNewAllotmentDay({ ...newAllotmentDay, quantity: e.target.value })
-                                  }
-                                />
-                              </div>
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                disabled={savingAllotmentDay}
-                                onClick={() => handleSaveAllotmentDay(t.id)}
-                              >
-                                Add / update day
-                              </button>
-                            </div>
-                            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-                              Setting a date that's already listed updates its quantity instead of adding a
-                              duplicate.
-                            </p>
-                            </>
-                            )}
                           </div>
                         </td>
                       </tr>
