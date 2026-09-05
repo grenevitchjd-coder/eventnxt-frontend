@@ -156,9 +156,20 @@ export default function AllotmentsTab({ onToast, eventId }) {
     const fam = seatingFamilies.find((f) => f.base === famBase(c.name))
     return fam ? fam.rep.id : id
   }
+  // Section labels for a pool's WHOLE family (union across the day
+  // siblings) — the representative member doesn't always carry its own
+  // section rows, and a recipient's section must be offerable no matter
+  // which sibling ended up as the rep.
   const sectionLabelsOf = (catId) => {
     const c = (categories || []).find((x) => String(x.id) === String(catId))
-    return c && c.sections ? c.sections.map((s) => s.section_label) : []
+    if (!c) return []
+    const base = famBase(c.name)
+    const labels = []
+    for (const m of categories || []) {
+      if (famBase(m.name) !== base) continue
+      for (const s of m.sections || []) if (!labels.includes(s.section_label)) labels.push(s.section_label)
+    }
+    return labels
   }
 
   const typeTotalGhost = (g) => {
