@@ -232,6 +232,18 @@ export default function InvitesTab({ onToast, eventId }) {
 
   const dirtyIds = Object.keys(gridEdits).filter((id) => Object.keys(gridEdits[id] || {}).length > 0)
 
+  // The invite pill next to the name: one glance = where this person
+  // stands. Requesting-more wins (it needs the organizer's action), then
+  // the answer states, then sent-ness for a still-pending invite.
+  const invitePill = (g) => {
+    if (ticketRequests.some((r) => r.status === 'pending' && String(r.guest_id) === String(g.id)))
+      return { cls: 'pill-requesting', label: 'requesting more' }
+    if (g.allocation_status === 'declined') return { cls: 'pill-declined', label: 'declined' }
+    if (g.allocation_status === 'confirmed') return { cls: 'pill-confirmed', label: 'confirmed' }
+    if (!g.link_sent_at) return { cls: 'pill-notsent', label: 'not sent' }
+    return { cls: 'pill-pending', label: 'pending' }
+  }
+
   // The type's derived offer, for placeholder hints on untouched day
   // cells ("2" ghosted = comes from the type's all-days/choose default).
   const typeDerivedCount = (g) => {
@@ -1194,8 +1206,12 @@ export default function InvitesTab({ onToast, eventId }) {
                       <tr className="invite-main">
                         <td rowSpan={2}>
                           {g.name}
-                          <span className="pill pill-pending" style={{ marginLeft: 6, fontSize: 10.5 }}>
-                            {g.effective_mode || 'invite'}
+                          <span
+                            className={`pill ${invitePill(g).cls}`}
+                            style={{ marginLeft: 6, fontSize: 10.5 }}
+                            title="Invite state — requesting more > declined/confirmed > sent-but-pending > not sent"
+                          >
+                            {invitePill(g).label}
                           </span>
                           {g.needs_seating && (
                             <span className="pill pill-declined" style={{ marginLeft: 4, fontSize: 10.5 }}>
@@ -1324,7 +1340,7 @@ export default function InvitesTab({ onToast, eventId }) {
                       </tr>
                       <tr className="invite-meta">
                         <td colSpan={inviteColCount - 1}>
-                        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                         <div>
                           <span className="meta-label">Status</span>
                           <select
