@@ -1386,7 +1386,7 @@ export default function InvitesTab({ onToast, eventId }) {
                             </button>
                           </div>
                         </div>
-                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                           {seatAssignable(g) && (
                             <button
                               className="btn btn-secondary btn-sm"
