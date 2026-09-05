@@ -107,6 +107,10 @@ export default function InvitesTab({ onToast, eventId }) {
   // Labeled reserved-seat holds across the event ("Carey Grant × 2 in
   // Row 1 Front") — used to wave a flag on matching guests' rows.
   const [labeledHolds, setLabeledHolds] = useState([])
+  // Per-type default day rows ({guest_type_id: {date: qty}}), fetched
+  // best-effort so untouched day cells can GHOST what the backend will
+  // actually grant (effective_allotment inherits these rows).
+  const [typeAllotments, setTypeAllotments] = useState({})
   const guestEventDays = (() => {
     const s = guestEventSettings
     if (!s || !s.first_day || !s.last_day || !['per_day', 'mixed', 'multi_day'].includes(s.ticket_span)) return []
@@ -151,6 +155,16 @@ export default function InvitesTab({ onToast, eventId }) {
         setGuests(gsts)
         setGuestTypes(types)
         api.listLabeledHolds(id).then(setLabeledHolds).catch(() => setLabeledHolds([]))
+        Promise.all(
+          types.map(async (t) => {
+            try {
+              const rows = await api.listTicketAllotments(id, t.id)
+              return [t.id, Object.fromEntries(rows.map((r) => [r.date, r.quantity]))]
+            } catch {
+              return [t.id, {}]
+            }
+          })
+        ).then((entries) => setTypeAllotments(Object.fromEntries(entries)))
       setLoadedEventId(id)
         sessionStorage.setItem('eventnxt_last_event_id', id)
       })
@@ -276,6 +290,23 @@ export default function InvitesTab({ onToast, eventId }) {
     return t && ['all', 'choose'].includes(t.day_scope) && t.default_ticket_count ? t.default_ticket_count : null
   }
 
+  // Ghost for ONE day cell: the shape default when the type declares
+  // one, else the type's explicit row for that day — i.e. what the
+  // backend's effective_allotment will grant if the cell stays empty.
+  const typeDayGhost = (g, d) => {
+    const shape = typeDerivedCount(g)
+    if (shape) return shape
+    const rows = typeAllotments[gridVal(g, 'guest_type_id') || g.guest_type_id]
+    return rows && rows[d] ? rows[d] : null
+  }
+
+  // Ghost for the Total cell: the type's default_spend_total (stamped
+  // onto new guests at add; shown as a hint for guests without one).
+  const typeTotalGhost = (g) => {
+    const t = guestTypes.find((x) => x.id === (gridVal(g, 'guest_type_id') || g.guest_type_id))
+    return t && t.default_spend_total ? t.default_spend_total : null
+  }
+
   // Party is no longer a control: for a granted invitee, "heads" IS the
   // largest single-day ticket count (2 Thu / 4 Sat = a party of 4 chairs
   // at peak). Derived on save so seats and capacity math always agree
@@ -284,7 +315,7 @@ export default function InvitesTab({ onToast, eventId }) {
   const derivedParty = (g) => {
     const perDay = guestEventDays.map((d) => {
       const raw = String(gridVal(g, `day:${d}`))
-      return raw === '' ? typeDerivedCount(g) || 0 : parseInt(raw, 10) || 0
+      return raw === '' ? typeDayGhost(g, d) || 0 : parseInt(raw, 10) || 0
     })
     const peak = perDay.length ? Math.max(...perDay) : 0
     return peak > 0 ? peak : g.party_size || 1
@@ -1313,9 +1344,9 @@ export default function InvitesTab({ onToast, eventId }) {
                             <input
                               type="number"
                               min={0}
-                              placeholder={typeDerivedCount(g) ? String(typeDerivedCount(g)) : '—'}
+                              placeholder={typeDayGhost(g, d) ? String(typeDayGhost(g, d)) : '—'}
                               title={
-                                typeDerivedCount(g) && !gridVal(g, `day:${d}`)
+                                typeDayGhost(g, d) && !gridVal(g, `day:${d}`)
                                   ? 'From the type default — type a number to override'
                                   : 'Tickets offered for this day'
                               }
@@ -1329,7 +1360,7 @@ export default function InvitesTab({ onToast, eventId }) {
                           <input
                             type="number"
                             min={1}
-                            placeholder="all"
+                            placeholder={typeTotalGhost(g) ? String(typeTotalGhost(g)) : 'all'}
                             title="Blank = fixed offer. Lower than the day amounts = the guest chooses where to spend."
                             style={{ ...selectStyle, width: 52, textAlign: 'center' }}
                             value={gridVal(g, 'spend_total')}

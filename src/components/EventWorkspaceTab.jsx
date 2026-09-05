@@ -21,7 +21,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
 
   // ---- Guest types (accordion) ----
-  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '' })
+  const [typeForm, setTypeForm] = useState({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '', default_spend_total: '' })
   const [creatingType, setCreatingType] = useState(false)
   const [editingTypeId, setEditingTypeId] = useState(null)
   const [typeEditForm, setTypeEditForm] = useState({ name: '', guest_mode: '' })
@@ -74,9 +74,10 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
         day_scope: typeForm.day_scope || null,
         default_ticket_count: parseInt(typeForm.default_ticket_count, 10) || null,
         default_hold_timing: typeForm.default_hold_timing || null,
+        default_spend_total: parseInt(typeForm.default_spend_total, 10) || null,
       })
       onToast(`"${typeForm.name}" added`)
-      setTypeForm({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '' })
+      setTypeForm({ name: '', guest_mode: 'invite', day_scope: '', default_ticket_count: '', default_hold_timing: '', default_spend_total: '' })
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -87,7 +88,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
 
   const startEditType = (type) => {
     setEditingTypeId(type.id)
-    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '', day_scope: type.day_scope || '', default_ticket_count: type.default_ticket_count || '', default_hold_timing: type.default_hold_timing || '' })
+    setTypeEditForm({ name: type.name, guest_mode: type.guest_mode || '', day_scope: type.day_scope || '', default_ticket_count: type.default_ticket_count || '', default_hold_timing: type.default_hold_timing || '', default_spend_total: type.default_spend_total || '' })
   }
 
   const saveEditType = async (typeId) => {
@@ -99,6 +100,7 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
         day_scope: typeEditForm.day_scope || null,
         default_ticket_count: parseInt(typeEditForm.default_ticket_count, 10) || null,
         default_hold_timing: typeEditForm.default_hold_timing || null,
+        default_spend_total: parseInt(typeEditForm.default_spend_total, 10) || null,
       })
       onToast('Saved')
       setEditingTypeId(null)
@@ -291,6 +293,19 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                   onChange={(e) => setTypeForm({ ...typeForm, default_ticket_count: e.target.value })}
                 />
               </div>
+              <div className="field" style={{ width: 110 }}>
+                <label htmlFor="type-total" title="The across-days cap stamped on each added guest. Set it LOWER than the day amounts and their RSVP page becomes a chooser — 'place your N across these caps'. Blank = fixed offer.">
+                  Total (cap)
+                </label>
+                <input
+                  id="type-total"
+                  type="number"
+                  min={1}
+                  placeholder="all"
+                  value={typeForm.default_spend_total}
+                  onChange={(e) => setTypeForm({ ...typeForm, default_spend_total: e.target.value })}
+                />
+              </div>
               <div className="field">
                 <label htmlFor="type-hold" title="Default for new guests of this type — when their tickets are pulled from sellable inventory">
                   Pull from inventory
@@ -349,6 +364,15 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                               <option value="distribute">Allotment — hands tickets out</option>
                               {typeEditForm.guest_mode === '' && <option value="">Auto (legacy — retired)</option>}
                             </select>
+                            <input
+                              type="number"
+                              min={1}
+                              placeholder="Total (cap) — blank = fixed offer"
+                              title="Across-days cap stamped on each added guest — lower than the day amounts turns their RSVP into a chooser"
+                              style={{ marginTop: 6, width: '100%' }}
+                              value={typeEditForm.default_spend_total}
+                              onChange={(e) => setTypeEditForm({ ...typeEditForm, default_spend_total: e.target.value })}
+                            />
                         </td>
                         <td className="actions-cell">
                           <button
@@ -560,11 +584,11 @@ export default function EventWorkspaceTab({ onToast, eventId }) {
                             }}
                           >
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              Ticket allotment — how many tickets a guest of this type gets to hand out
-                              themselves, per day. Each day is its own separate pool — e.g. 10 Thursday
-                              tickets and 5 Saturday tickets never share capacity. Leave empty for an
-                              ordinary yes/no guest with nothing to distribute. Overridable per guest when
-                              adding them.
+                              Ticket allotment — the DAY CAPS for a guest of this type, plus the TOTAL
+                              across days{t.default_spend_total ? ` (currently ${t.default_spend_total} — set via Edit)` : ' (none set — Edit the type to add one)'}.
+                              A total lower than the day amounts turns the guest&apos;s RSVP into a chooser
+                              (&ldquo;place your {t.default_spend_total || 'N'} across these caps&rdquo;).
+                              Leave everything empty for an ordinary yes/no guest. Overridable per guest.
                             </div>
 
                             {!ticketAllotments[t.id] ? (
