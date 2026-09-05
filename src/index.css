@@ -534,11 +534,16 @@ a:focus-visible {
   padding-bottom: 8px;
 }
 
-/* One column per wide grid absorbs the table's slack width, pushing the
-   numeric columns (days / Total / Pull) out toward the right edge
-   instead of leaving dead space after them. */
+/* One column per wide grid absorbs MOST of the table's slack width,
+   moving the numeric columns (days / Total / Pull) toward the right —
+   but capped, so they land near the edge with breathing room instead of
+   crushed against it with wrapped headers. */
 .data-table th.col-flex {
-  width: 100%;
+  width: 45%;
+}
+
+.table-scroll > .data-table th {
+  white-space: nowrap;
 }
 
 .meta-label {
