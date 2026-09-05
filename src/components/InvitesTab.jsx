@@ -1142,6 +1142,7 @@ export default function InvitesTab({ onToast, eventId }) {
             </p>
           </div>
 
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -1504,6 +1505,7 @@ export default function InvitesTab({ onToast, eventId }) {
               )}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </>

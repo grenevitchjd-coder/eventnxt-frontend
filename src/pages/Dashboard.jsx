@@ -42,6 +42,9 @@ const LAST_EVENT_KEY = 'eventnxt_last_event_id'
 // Which sidebar groups the user has manually opened. localStorage (not
 // session) — how you arrange your sidebar should survive a new tab.
 const NAV_OPEN_KEY = 'eventnxt_nav_open'
+// Whether the whole sidebar is collapsed to a slim rail — more room for
+// the wide grids. Same persistence reasoning as NAV_OPEN_KEY.
+const SIDEBAR_COLLAPSED_KEY = 'eventnxt_sidebar_collapsed'
 
 const NAV_GROUPS = [
   {
@@ -88,6 +91,13 @@ export default function Dashboard() {
   const [events, setEvents] = useState(null) // null = loading, [] = none yet
   const [eventId, setEventId] = useState('')
   const [openGroups, setOpenGroups] = useState(loadOpenGroups)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -137,6 +147,18 @@ export default function Dashboard() {
     })
   }
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        // storage blocked — still works for this session
+      }
+      return next
+    })
+  }
+
   const currentEvent = events?.find((ev) => ev.id === eventId) || null
 
   const renderTab = () => {
@@ -180,11 +202,33 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
+        {sidebarCollapsed ? (
+          <button
+            className="sidebar-collapse-btn"
+            onClick={toggleSidebar}
+            title="Expand sidebar"
+            aria-expanded="false"
+            aria-label="Expand sidebar"
+          >
+            »
+          </button>
+        ) : (
+          <>
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" />
           EventNXT
+          <button
+            className="sidebar-collapse-btn"
+            onClick={toggleSidebar}
+            title="Collapse sidebar — more room for the grids"
+            aria-expanded="true"
+            aria-label="Collapse sidebar"
+            style={{ marginLeft: 'auto' }}
+          >
+            «
+          </button>
         </div>
 
         <div className="sidebar-event">
@@ -264,6 +308,8 @@ export default function Dashboard() {
             Log out
           </button>
         </div>
+          </>
+        )}
       </aside>
 
       <main className="main">{renderTab()}</main>

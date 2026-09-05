@@ -467,7 +467,8 @@ export default function AllotmentsTab({ onToast, eventId }) {
         </button>
       </div>
 
-      <table className="data-table" style={{ marginBottom: 28 }}>
+      <div className="table-scroll" style={{ marginBottom: 28 }}>
+      <table className="data-table">
         <thead>
           <tr>
             <th>Allotment</th>
@@ -678,6 +679,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
           )}
         </tbody>
       </table>
+      </div>
     </>
   )
 }
