@@ -534,6 +534,13 @@ a:focus-visible {
   padding-bottom: 8px;
 }
 
+/* One column per wide grid absorbs the table's slack width, pushing the
+   numeric columns (days / Total / Pull) out toward the right edge
+   instead of leaving dead space after them. */
+.data-table th.col-flex {
+  width: 100%;
+}
+
 .meta-label {
   display: block;
   font-size: 10.5px;

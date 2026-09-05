@@ -1286,7 +1286,7 @@ export default function InvitesTab({ onToast, eventId }) {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Seating</th>
+                <th className="col-flex">Seating</th>
                 {guestEventDays.map((d) => (
                   <th key={d} style={{ textAlign: 'center' }}>{fmtGuestDay(d)}</th>
                 ))}
