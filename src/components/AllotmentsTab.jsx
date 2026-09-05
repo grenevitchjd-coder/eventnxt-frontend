@@ -136,6 +136,31 @@ export default function AllotmentsTab({ onToast, eventId }) {
     return rows && rows[d] ? rows[d] : null
   }
   const typeDayGhost = (g, d) => (g.ticket_allotment_overridden ? null : typeDayDefault(g, d))
+  // Day-cloned pool families, collapsed exactly like the Invites Seating
+  // dropdown — recipients' seating is chosen per AREA; the backend maps
+  // each recipient to the sibling pool serving their night.
+  const famBase = (name) => String(name || '').replace(/\s*\(\d{2}\/\d{2}\)$/, '')
+  const seatingFamilies = (() => {
+    const byBase = new Map()
+    for (const c of categories || []) {
+      const base = famBase(c.name)
+      const cur = byBase.get(base)
+      const isBare = c.name === base
+      if (!cur || (isBare && !cur.bare)) byBase.set(base, { base, rep: c, bare: isBare })
+    }
+    return [...byBase.values()]
+  })()
+  const familyRepId = (id) => {
+    const c = (categories || []).find((x) => String(x.id) === String(id))
+    if (!c) return id || ''
+    const fam = seatingFamilies.find((f) => f.base === famBase(c.name))
+    return fam ? fam.rep.id : id
+  }
+  const sectionLabelsOf = (catId) => {
+    const c = (categories || []).find((x) => String(x.id) === String(catId))
+    return c && c.sections ? c.sections.map((s) => s.section_label) : []
+  }
+
   const typeTotalGhost = (g) => {
     const t = guestTypes.find((x) => x.id === (gridVal(g, 'guest_type_id') || g.guest_type_id))
     return t && t.default_spend_total ? t.default_spend_total : null
@@ -153,6 +178,9 @@ export default function AllotmentsTab({ onToast, eventId }) {
       return v === undefined ? '' : String(v)
     }
     if (field === 'spend_total') return g.spend_total ? String(g.spend_total) : ''
+    if (field === 'hold_timing') return g.hold_timing || 'now'
+    if (field === 'recipient_seating_category_id') return g.recipient_seating_category_id || ''
+    if (field === 'recipient_section_label') return g.recipient_section_label || ''
     return g[field] ?? ''
   }
 
@@ -211,7 +239,9 @@ export default function AllotmentsTab({ onToast, eventId }) {
       perks: g.perks || null,
       comments: g.comments || null,
       guest_mode: g.guest_mode ?? 'distribute',
-      hold_timing: g.hold_timing || 'now',
+      hold_timing: gridVal(g, 'hold_timing') || 'now',
+      recipient_seating_category_id: gridVal(g, 'recipient_seating_category_id') || null,
+      recipient_section_label: gridVal(g, 'recipient_section_label') || null,
       spend_total: parseInt(gridVal(g, 'spend_total'), 10) || null,
       cohort_together: g.cohort_together,
       ...(ticket_allotment !== null ? { ticket_allotment } : {}),
@@ -434,7 +464,10 @@ export default function AllotmentsTab({ onToast, eventId }) {
 
   if (!loadedEventId || guests === null) return null
 
-  const colCount = 6 + budgetCols.length
+  // Two-row blocks: thead holds the OFFER (Allotment name spans both
+  // rows, then day budgets, Total, Given out); the lifecycle strip below
+  // each row carries Type / Recipients' seating / Pull / actions.
+  const colCount = 3 + budgetCols.length
 
   return (
     <>
@@ -543,7 +576,6 @@ export default function AllotmentsTab({ onToast, eventId }) {
         <thead>
           <tr>
             <th>Allotment</th>
-            <th>Type</th>
             {budgetCols.map((d) => (
               <th key={d || 'any'} style={{ textAlign: 'center' }}>
                 {d ? (
@@ -561,11 +593,7 @@ export default function AllotmentsTab({ onToast, eventId }) {
             <th title="Set LOWER than the day budgets to cap the whole allotment — e.g. 25 across 10/10/10. The portal enforces it.">
               Total
             </th>
-            <th>Given out</th>
-            <th title="Where the type's seating priorities will place recipients (automatic), and whether same-day recipients sit together">
-              Seating
-            </th>
-            <th className="col-flex"></th>
+            <th className="col-flex">Given out</th>
           </tr>
         </thead>
         <tbody>
@@ -585,8 +613,8 @@ export default function AllotmentsTab({ onToast, eventId }) {
               const summary = seatingSummary(g)
               return (
                 <Fragment key={g.id}>
-                  <tr>
-                    <td>
+                  <tr className="invite-main">
+                    <td rowSpan={2}>
                       <div style={{ fontWeight: 600 }}>{g.name}</div>
                       <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                         {g.email}
@@ -605,19 +633,6 @@ export default function AllotmentsTab({ onToast, eventId }) {
                           {g.link_sent_at ? '✓ Email again' : 'Email link'}
                         </button>
                       </div>
-                    </td>
-                    <td>
-                      <select
-                        style={selectStyle}
-                        value={gridVal(g, 'guest_type_id')}
-                        onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
-                      >
-                        {guestTypes.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </select>
                     </td>
                     {budgetCols.map((d) => (
                       <td key={d || 'any'} style={{ textAlign: 'center' }}>
@@ -647,23 +662,61 @@ export default function AllotmentsTab({ onToast, eventId }) {
                       {g.allotment_distributed} /{' '}
                       {g.spend_total && g.spend_total < g.allotment_total ? g.spend_total : g.allotment_total}
                     </td>
-                    <td style={{ fontSize: 12 }}>
-                      {summary ? (
-                        <span title="From the guest type's seating priorities — placement is automatic on confirm">
-                          via {summary}
-                        </span>
-                      ) : (
-                        <span
-                          style={{ color: 'var(--danger, #c55)' }}
-                          title="This type has no seating priorities — recipients will need manual seating"
+                  </tr>
+                  <tr className="invite-meta">
+                    <td colSpan={colCount - 1}>
+                    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    <div>
+                      <span className="meta-label">Type</span>
+                      <select
+                        style={selectStyle}
+                        value={gridVal(g, 'guest_type_id')}
+                        onChange={(e) => setGridVal(g, 'guest_type_id', e.target.value)}
+                      >
+                        {guestTypes.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span className="meta-label">Recipients&apos; seating</span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <select
+                          style={selectStyle}
+                          title="Where this allotment's recipients are placed — Auto follows the type's priorities; a choice here wins while it has room, day-mapped per recipient"
+                          value={familyRepId(gridVal(g, 'recipient_seating_category_id'))}
+                          onChange={(e) => {
+                            setGridVal(g, 'recipient_seating_category_id', e.target.value)
+                            setGridVal(g, 'recipient_section_label', '')
+                          }}
                         >
-                          no priorities set
-                        </span>
-                      )}
-                      <div>
+                          <option value="">{summary ? `Auto — via ${summary}` : 'Auto (no priorities set)'}</option>
+                          {seatingFamilies.map((f) => (
+                            <option key={f.rep.id} value={f.rep.id}>
+                              {f.base}
+                            </option>
+                          ))}
+                        </select>
+                        {gridVal(g, 'recipient_seating_category_id') &&
+                          sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).length > 0 && (
+                            <select
+                              style={selectStyle}
+                              title="A specific section, or anywhere in the area"
+                              value={gridVal(g, 'recipient_section_label')}
+                              onChange={(e) => setGridVal(g, 'recipient_section_label', e.target.value)}
+                            >
+                              <option value="">Anywhere</option>
+                              {sectionLabelsOf(familyRepId(gridVal(g, 'recipient_seating_category_id'))).map((s) => (
+                                <option key={s} value={s}>
+                                  Sec {s}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         <button
                           className="btn btn-secondary btn-sm"
-                          style={{ marginTop: 4 }}
                           disabled={busyId === g.id}
                           title="Same-day recipients from this allotment: one section side by side, or spread individually"
                           onClick={() => toggleCohort(g)}
@@ -671,14 +724,34 @@ export default function AllotmentsTab({ onToast, eventId }) {
                           {g.cohort_together !== false ? 'Together' : 'Spread'}
                         </button>
                       </div>
-                    </td>
-                    <td className="actions-cell">
-                      <button className="btn btn-secondary btn-sm" onClick={() => setExpandedId(expandedId === g.id ? null : g.id)}>
-                        {expandedId === g.id ? 'Hide' : `Recipients (${kids.length})`}
-                      </button>
-                      <button className="btn btn-danger btn-sm" disabled={busyId === g.id} onClick={() => deleteAllotment(g)}>
-                        Delete
-                      </button>
+                    </div>
+                    {!externalTicketing && (
+                      <div>
+                        <span className="meta-label">Pull</span>
+                        <select
+                          style={selectStyle}
+                          title="When recipients' tickets are pulled from sellable inventory"
+                          value={gridVal(g, 'hold_timing')}
+                          onChange={(e) => setGridVal(g, 'hold_timing', e.target.value)}
+                        >
+                          <option value="now">Now</option>
+                          <option value="on_confirm">On yes</option>
+                          <option value="later">Later</option>
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <span className="meta-label">&nbsp;</span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setExpandedId(expandedId === g.id ? null : g.id)}>
+                          {expandedId === g.id ? 'Hide' : `Recipients (${kids.length})`}
+                        </button>
+                        <button className="btn btn-danger btn-sm" disabled={busyId === g.id} onClick={() => deleteAllotment(g)}>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    </div>
                     </td>
                   </tr>
                   {expandedId === g.id && (
