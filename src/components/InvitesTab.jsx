@@ -436,7 +436,7 @@ export default function InvitesTab({ onToast, eventId }) {
 
   const handleExportGuests = () => {
     if (visibleGuests.length === 0) {
-      onToast('No guests match the current filters', true)
+      onToast('No invitees match the current filters', true)
       return
     }
     const csv = Papa.unparse({
@@ -749,13 +749,16 @@ export default function InvitesTab({ onToast, eventId }) {
     ? [...new Set(guests.map((g) => g.visit_date).filter(Boolean))].sort()
     : []
 
-  const visibleGuests = (guests || []).filter((g) => {
-    // This page is the INVITE side only: distributors live on the
-    // Allotments page, and their delegated recipients live nested under
-    // them there. Everyone still appears together on the Guest list
-    // (door roster) page.
-    if (g.allocated_by_guest_id) return false
-    if ((g.effective_mode || 'invite') === 'distribute') return false
+  // This page is the INVITE side only: distributors live on the
+  // Allotments page, and their delegated recipients live nested under
+  // them there. Everyone still appears together on the Guest list
+  // (door roster) page. Counts shown on this page are counts of
+  // INVITEES — people who can ever appear here — never of all guests.
+  const invitees = (guests || []).filter(
+    (g) => !g.allocated_by_guest_id && (g.effective_mode || 'invite') !== 'distribute'
+  )
+  const elsewhereCount = (guests || []).length - invitees.length
+  const visibleGuests = invitees.filter((g) => {
     if (filterType && g.guest_type_id !== filterType) return false
     if (filterStatus && g.allocation_status !== filterStatus) return false
     if (filterDay && g.visit_date !== filterDay) return false
@@ -1052,7 +1055,7 @@ export default function InvitesTab({ onToast, eventId }) {
           )}
 
           <div className="panel">
-            <div className="panel-title">Guest list</div>
+            <div className="panel-title">Find &amp; filter</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
               Search or filter to find someone quickly — the same filters apply to the CSV download below.
             </p>
@@ -1133,7 +1136,9 @@ export default function InvitesTab({ onToast, eventId }) {
               </button>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 12, marginBottom: 0 }}>
-              Showing {visibleGuests.length} of {guests.length} guest{guests.length === 1 ? '' : 's'}
+              Showing {visibleGuests.length} of {invitees.length} invitee{invitees.length === 1 ? '' : 's'}
+              {elsewhereCount > 0 &&
+                ` · ${elsewhereCount} other guest${elsewhereCount === 1 ? ' lives' : 's live'} on Allotments and Guest list`}
             </p>
           </div>
 
@@ -1160,7 +1165,11 @@ export default function InvitesTab({ onToast, eventId }) {
               {visibleGuests.length === 0 ? (
                 <tr>
                   <td colSpan={10 + guestEventDays.length} className="empty-state">
-                    {guests.length === 0 ? 'No guests yet — add people above.' : 'No guests match the current filters.'}
+                    {invitees.length === 0
+                      ? guests.length === 0
+                        ? 'No guests yet — add people above.'
+                        : 'No direct invitees yet — add people above. Allotment holders and their recipients live on the Allotments page.'
+                      : 'No invitees match the current filters.'}
                   </td>
                 </tr>
               ) : (
