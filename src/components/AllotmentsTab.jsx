@@ -130,8 +130,12 @@ export default function AllotmentsTab({ onToast, eventId }) {
     const first = prios[0]
     const cat = categories.find((c) => c.id === first.seating_category_id)
     if (!cat) return null
-    const secs = first.allowed_sections?.length
-      ? ` (Sec ${first.allowed_sections.join(', ')})`
+    // allowed_sections arrives comma-joined as stored ("C,D") — the create
+    // REQUEST takes a list, but the response is the string. Rendering with
+    // .join() on it was a render-crash (white page) the moment the first
+    // allotment row appeared for a type with multi-section priorities.
+    const secs = first.allowed_sections
+      ? ` (Sec ${String(first.allowed_sections).split(',').map((s) => s.trim()).filter(Boolean).join(', ')})`
       : first.section_label
         ? ` (Sec ${first.section_label})`
         : ''
