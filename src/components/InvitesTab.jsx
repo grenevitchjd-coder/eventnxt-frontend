@@ -232,6 +232,31 @@ export default function InvitesTab({ onToast, eventId }) {
 
   const dirtyIds = Object.keys(gridEdits).filter((id) => Object.keys(gridEdits[id] || {}).length > 0)
 
+  // Day-cloned pool families: fan-out names per-day pools
+  // "Row 2 (12/25)", "Row 2 (12/26)" after the base "Row 2". For comps
+  // the organizer picks the AREA once — the backend already maps a
+  // guest's home pool to the right day's sibling per granted day
+  // (holds, capacity, and auto-placement are family-aware). So the
+  // Seating dropdown shows ONE entry per family; picking it stores the
+  // family's representative pool (the bare-named member when present).
+  const famBase = (name) => String(name || '').replace(/\s*\(\d{2}\/\d{2}\)$/, '')
+  const seatingFamilies = (() => {
+    const byBase = new Map()
+    for (const c of categories || []) {
+      const base = famBase(c.name)
+      const cur = byBase.get(base)
+      const isBare = c.name === base
+      if (!cur || (isBare && !cur.bare)) byBase.set(base, { base, rep: c, bare: isBare })
+    }
+    return [...byBase.values()]
+  })()
+  const familyRepId = (id) => {
+    const c = (categories || []).find((x) => String(x.id) === String(id))
+    if (!c) return id || ''
+    const fam = seatingFamilies.find((f) => f.base === famBase(c.name))
+    return fam ? fam.rep.id : id
+  }
+
   // The invite pill next to the name: one glance = where this person
   // stands. Requesting-more wins (it needs the organizer's action), then
   // the answer states, then sent-ness for a still-pending invite.
@@ -1248,14 +1273,14 @@ export default function InvitesTab({ onToast, eventId }) {
                         <td>
                           <select
                             style={selectStyle}
-                            title="Seating area — Auto follows the type's priorities on confirm"
-                            value={gridVal(g, 'seating_category_id')}
+                            title="Seating area — one choice per area; the days come from the day amounts. Auto follows the type's priorities on confirm"
+                            value={familyRepId(gridVal(g, 'seating_category_id'))}
                             onChange={(e) => setGridVal(g, 'seating_category_id', e.target.value)}
                           >
                             <option value="">Auto</option>
-                            {categories.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
+                            {seatingFamilies.map((f) => (
+                              <option key={f.rep.id} value={f.rep.id}>
+                                {f.base}
                               </option>
                             ))}
                           </select>
