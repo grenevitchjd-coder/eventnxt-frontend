@@ -1054,6 +1054,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               <th>Qty</th>
               <th>Sold</th>
               <th>Held</th>
+              <th title="Heads promised to comp guests (invites & allotments) on this type's pool — already subtracted from Avail.">Comps</th>
               <th>Avail.</th>
               <th>Status</th>
               <th></th>
@@ -1062,7 +1063,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
           <tbody>
             {ticketTypes.length === 0 ? (
               <tr>
-                <td colSpan={8} className="empty-state">
+                <td colSpan={9} className="empty-state">
                   No ticket types yet — the public page shows the external ticket link (if set) until one
                   exists here.
                 </td>
@@ -1117,7 +1118,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                             onChange={(e) => setEditForm({ ...editForm, admits: e.target.value })}
                           />
                         </td>
-                        <td colSpan={3}></td>
+                        <td colSpan={4}></td>
                         <td className="actions-cell">
                           <button className="btn btn-secondary btn-sm" disabled={savingEdit} onClick={() => saveEdit(t)}>
                             Save
@@ -1161,6 +1162,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                         <td className="mono">{t.quantity}</td>
                         <td className="mono">{t.sold}</td>
                         <td className="mono">{t.held}</td>
+                        <td className="mono">{t.comp_held || 0}</td>
                         <td className="mono">{t.available}</td>
                         <td>
                           <span className={`pill pill-${t.is_active ? 'confirmed' : 'pending'}`}>
@@ -1214,7 +1216,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     )}
                     {sectionsOpenId === t.id && (
                       <tr>
-                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
                             {t.name} — sections
                           </div>
@@ -1311,7 +1313,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     )}
                     {passOpenId === t.id && (
                       <tr>
-                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
                             All-days pass from &ldquo;{t.name}&rdquo;
                           </div>
@@ -1355,7 +1357,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     )}
                     {convertOpenId === t.id && (
                       <tr>
-                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
                             Use the nightly seats for &ldquo;{t.name}&rdquo;
                           </div>
@@ -1391,7 +1393,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     )}
                     {seatsOpenId === t.id && (
                       <tr>
-                        <td colSpan={8} style={{ background: 'var(--surface-alt)' }}>
+                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
                             {t.name} — reserved seats
                           </div>
