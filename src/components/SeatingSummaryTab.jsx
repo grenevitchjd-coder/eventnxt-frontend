@@ -223,9 +223,10 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
           draft[key] = {
             pool: m.is_admission === false ? '__not_admission__' : m.seating_category_id || '',
             face: m.face_value_cents != null ? String(m.face_value_cents / 100) : '',
+            allDays: !!m.all_days,
           }
         } else {
-          draft[key] = { pool: poolByNorm[key] || poolByNorm[baseKey] || '', face: '' }
+          draft[key] = { pool: poolByNorm[key] || poolByNorm[baseKey] || '', face: '', allDays: false }
         }
       }
       setMappingDraft(draft)
@@ -248,12 +249,13 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
       // Save the label->area answers first — the import right after is
       // what applies them (and every future upload applies them free).
       const mappings = Object.entries(mappingDraft)
-        .filter(([, d]) => d.pool || d.face)
+        .filter(([, d]) => d.pool || d.face || d.allDays)
         .map(([label, d]) => ({
           raw_label: label,
           seating_category_id: d.pool && d.pool !== '__not_admission__' ? d.pool : null,
           face_value_cents: d.face ? Math.round(Number(d.face) * 100) : null,
           is_admission: d.pool !== '__not_admission__',
+          all_days: !!d.allDays && d.pool !== '__not_admission__',
         }))
       if (mappings.length) await api.putSaleTypeMappings(loadedEventId, mappings)
       const rows = stagedSaleRows.map((r) => ({
@@ -450,7 +452,8 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
                   One answer per ticket-type in the file — saved, so next month&apos;s upload maps itself.
                   Pick the <strong>base</strong> area; a day in the ticket name (or the selector below)
                   routes to that night&apos;s copy automatically. Face value fills missing amounts (minus
-                  any coupon) so percentage rewards can compute.
+                  any coupon) so percentage rewards can compute. Tick <strong>Every night</strong> for
+                  weekend passes/packages — one row then counts into every night of that area.
                 </p>
                 <table className="data-table">
                   <thead>
@@ -458,7 +461,8 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
                       <th>Ticket type in file</th>
                       <th>Tickets</th>
                       <th>Area</th>
-                      <th className="col-flex">Face value ($, optional)</th>
+                      <th>Face value ($, optional)</th>
+                      {eventDays.length > 1 && <th className="col-flex" title="Weekend pass / package — one row consumes a head EVERY night">Every night</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -494,6 +498,17 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
                               onChange={(e) => setD({ face: e.target.value })}
                             />
                           </td>
+                          {eventDays.length > 1 && (
+                            <td>
+                              <input
+                                type="checkbox"
+                                title="A package: counts into every night of this area's family"
+                                checked={!!d.allDays}
+                                disabled={d.pool === '__not_admission__'}
+                                onChange={(e) => setD({ allDays: e.target.checked })}
+                              />
+                            </td>
+                          )}
                         </tr>
                       )
                     })}

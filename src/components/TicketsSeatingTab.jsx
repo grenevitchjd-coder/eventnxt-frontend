@@ -147,6 +147,12 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     .map((x) => x.trim())
     .filter(Boolean)
 
+  // 'table' and 'room' are ONE structure (a purchasable unit of N heads
+  // with its own identity — sales_grain 'table'); 'room' is the same
+  // basis wearing selling-appropriate words ("space" not "table").
+  const grouped = composer.basis === 'table' || composer.basis === 'room'
+  const unitWord = composer.basis === 'room' ? 'space' : 'table'
+
   const composerTotal = () => {
     if (composer.basis === 'area') return Number(composer.area_capacity) || 0
     if (composer.basis === 'row')
@@ -165,13 +171,13 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const composerUnits = () => {
     const total = composerTotal()
     if (composer.basis === 'area') return Number(composer.area_capacity) || 0
-    if (composer.basis === 'table' && composer.sell_by === 'table')
+    if (grouped && composer.sell_by === 'table')
       return parsedSections.reduce((sum, name) => sum + (Number((composer.section_tables[name] || {}).tables) || 0), 0)
     return total
   }
   const composerAdmits = () => {
     if (composer.basis === 'area') return Math.max(1, parseInt(composer.admits, 10) || 1)
-    if (composer.basis === 'table' && composer.sell_by === 'table') {
+    if (grouped && composer.sell_by === 'table') {
       const seatCounts = parsedSections.map((name) => Number((composer.section_tables[name] || {}).seats) || 0)
       return seatCounts[0] || 1
     }
@@ -207,6 +213,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     if (composer.basis === 'row')
       return `${composer.row_label || 'Row'} — Section${parsedSections.length > 1 ? 's' : ''} ${secs}`
     if (composer.basis === 'table') return `Tables — Section${parsedSections.length > 1 ? 's' : ''} ${secs}`
+    if (composer.basis === 'room') return `Room spaces — Section${parsedSections.length > 1 ? 's' : ''} ${secs}`
     return ''
   }
 
@@ -221,8 +228,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       onToast('List at least one section (e.g. "A, B").', true)
       return
     }
-    if (composer.basis === 'table' && composer.sell_by === 'table' && !tableSeatsUniform()) {
-      onToast('Selling whole tables needs the same seats-per-table in every section — split into separate ticket types instead.', true)
+    if (grouped && composer.sell_by === 'table' && !tableSeatsUniform()) {
+      onToast(`Selling whole ${unitWord}s needs the same capacity per ${unitWord} in every section — split into separate ticket types instead.`, true)
       return
     }
     const ttName = composer.name.trim() || autoName()
@@ -278,7 +285,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     setCreating(true)
     try {
       // 1. The seating pool behind this ticket type
-      const grain = composer.basis === 'area' ? 'ga' : composer.basis === 'table' ? 'table' : composer.assigned ? 'seat' : 'row'
+      const grain = composer.basis === 'area' ? 'ga' : grouped ? 'table' : composer.assigned ? 'seat' : 'row'
       const pool = await api.createSeatingCategory(eventId, {
         name: ttName,
         capacity: composer.basis === 'area' ? composerUnits() * composerAdmits() : 1, // heads; non-area derived from sections next
@@ -286,8 +293,8 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         row_label: composer.basis === 'row' ? composer.row_label || null : null,
         // pool-level table math is a placeholder — the real per-section
         // math lands in step 2 and derives the true capacity
-        table_count: composer.basis === 'table' ? 1 : null,
-        seats_per_table: composer.basis === 'table' ? 1 : null,
+        table_count: grouped ? 1 : null,
+        seats_per_table: grouped ? 1 : null,
       })
       // 2. Member sections (row/table bases)
       if (composer.basis !== 'area') {
@@ -1105,6 +1112,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   <option value="area">Named area (GA, VIP, Balcony…)</option>
                   <option value="row">Row</option>
                   <option value="table">Tables</option>
+                  <option value="room">Room spaces (multi-ticket units)</option>
                 </select>
               </div>
               {selling && (
@@ -1216,7 +1224,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               </div>
             )}
 
-            {selling && composer.basis === 'table' && (
+            {selling && grouped && (
               <div className="inline-form" style={{ marginTop: 4 }}>
                 <div className="field" style={{ width: 200 }}>
                   <label htmlFor="tt-sellby">Sold by</label>
@@ -1225,21 +1233,21 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     value={composer.sell_by}
                     onChange={(e) => setComposer({ ...composer, sell_by: e.target.value })}
                   >
-                    <option value="seat">Individual seat</option>
-                    <option value="table">Whole table</option>
+                    <option value="seat">{composer.basis === 'room' ? 'Individual ticket' : 'Individual seat'}</option>
+                    <option value="table">{composer.basis === 'room' ? 'Whole space' : 'Whole table'}</option>
                   </select>
                 </div>
                 {composer.sell_by === 'table' && (
                   <span style={{ alignSelf: 'flex-end', paddingBottom: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                    price is per table — one purchase admits the whole table
+                    price is per {unitWord} — one purchase admits the whole {unitWord}
                   </span>
                 )}
               </div>
             )}
-            {composer.basis === 'table' && parsedSections.length > 0 && (
+            {grouped && parsedSections.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                  Tables per section
+                  {composer.basis === 'room' ? 'Spaces per section' : 'Tables per section'}
                 </div>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   {parsedSections.map((name) => {
@@ -1247,7 +1255,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     return (
                       <div key={name} style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                         <div className="field" style={{ width: 85 }}>
-                          <label>Sec {name} tables</label>
+                          <label>Sec {name} {composer.basis === 'room' ? 'spaces' : 'tables'}</label>
                           <input
                             type="number"
                             min={1}
@@ -1262,7 +1270,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           />
                         </div>
                         <div className="field" style={{ width: 95 }}>
-                          <label>Seats / table</label>
+                          <label>{composer.basis === 'room' ? 'Tickets / space' : 'Seats / table'}</label>
                           <input
                             type="number"
                             min={1}
@@ -1678,7 +1686,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                           )}
                           {c.sales_grain === 'table' && (
                             <span className="pill pill-confirmed" style={{ fontSize: 10.5 }}>
-                              tables
+                              tables / rooms
                             </span>
                           )}
                         </td>
