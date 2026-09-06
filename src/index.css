@@ -1068,3 +1068,104 @@ a:focus-visible {
   color: var(--text-muted);
   margin: 0;
 }
+/* Ticket rows, unified (2026-09-05): name column fixed so every row's
+   Section select starts at the same x and reads Name -> Section -> seat/
+   qty across; the stepper hugs the right edge. Fixed select widths are
+   safe here — these are flex rows, not auto-layout tables (the
+   table-crush trap doesn't apply). */
+.ticket-picker-info {
+  flex: 0 0 220px;
+  min-width: 0;
+}
+.ticket-picker-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.ticket-picker-controls .ticket-qty-stepper {
+  margin-left: auto;
+}
+.ticket-section-select {
+  width: 150px;
+  min-width: 150px;
+}
+.ticket-seat-select {
+  width: 110px;
+  min-width: 110px;
+}
+@media (max-width: 560px) {
+  .ticket-picker-info { flex-basis: 100%; }
+}
+
+/* Checkout card (2026-09-05): the buyer form as a bounded, labeled card.
+   Everything derives from the existing tokens so organizer theming
+   (colors, display font) carries through untouched. */
+.checkout-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 22px 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  text-align: left;
+}
+.checkout-card-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.checkout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.checkout-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.checkout-field em {
+  font-style: normal;
+  font-weight: 400;
+}
+.checkout-field-code {
+  grid-column: 1 / -1;
+}
+.checkout-card input {
+  width: 100%;
+  max-width: none;
+  font-size: 14.5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.checkout-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.checkout-card .ticket-promo-ok,
+.checkout-card .ticket-promo-bad,
+.checkout-card .ticket-checkout-error {
+  margin: 10px 0 0;
+}
+.checkout-card .checkout-submit {
+  width: 100%;
+  margin-top: 14px;
+}
+.checkout-card .ticket-buyer-note {
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .checkout-grid { grid-template-columns: 1fr; }
+  .checkout-card { padding: 16px 14px 14px; }
+}

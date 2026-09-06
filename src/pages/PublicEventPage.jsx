@@ -556,15 +556,67 @@ export default function PublicEventPage() {
                       </div>
                     </div>
                     {t.on_sale && t.assigned_seating ? (
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
-                        {qtyFor(t) > 0 ? `${qtyFor(t)} seat${qtyFor(t) === 1 ? '' : 's'} picked` : 'Pick your seats below'}
-                      </span>
+                      <div className="ticket-picker-controls">
+                        {!seatMaps[t.id] ? (
+                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading seats…</span>
+                        ) : seatMaps[t.id].sections.length === 0 ? (
+                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                            Seats for this ticket are still being set up — check back shortly.
+                          </span>
+                        ) : (
+                          <>
+                            <select
+                              className="ticket-section-select"
+                              value={(pickDraft[t.id] || {}).section ?? ''}
+                              onChange={(e) =>
+                                setPickDraft({ ...pickDraft, [t.id]: { section: e.target.value, seat: '' } })
+                              }
+                              aria-label="Section"
+                            >
+                              <option value="">Section…</option>
+                              {seatMaps[t.id].sections.map((sec, i) => (
+                                <option key={i} value={String(i)}>
+                                  {sec.section_label}
+                                  {sec.row_label ? ` · ${sec.row_label}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="ticket-seat-select"
+                              value={(pickDraft[t.id] || {}).seat || ''}
+                              onChange={(e) => setPickDraft({ ...pickDraft, [t.id]: { ...(pickDraft[t.id] || {}), seat: e.target.value } })}
+                              disabled={(pickDraft[t.id] || {}).section === undefined || (pickDraft[t.id] || {}).section === ''}
+                              aria-label="Seat"
+                            >
+                              <option value="">Seat…</option>
+                              {(((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])).map((x) => {
+                                const gone = !x.available || (seatPicks[t.id] || []).includes(x.id)
+                                return (
+                                  <option key={x.id} value={x.id} disabled={gone} style={gone ? { color: '#999' } : undefined}>
+                                    Seat {x.seat_number}
+                                    {gone ? ' — taken' : ''}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => addSeatPick(t)}
+                              disabled={!(pickDraft[t.id] || {}).seat || qtyFor(t) >= Math.min(t.max_per_order, t.available)}
+                            >
+                              Add seat
+                            </button>
+                          </>
+                        )}
+                      </div>
                     ) : t.on_sale && isSectionedPass(t) ? (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <div className="ticket-picker-controls" style={{ alignItems: 'flex-end' }}>
                         {t.pass_nights.map((night) => (
                           <label key={night.date || 'night'} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11.5, color: 'var(--text-muted)' }}>
                             {night.date ? dayLabel(night.date) : 'Night'}
                             <select
+                              className="ticket-section-select"
                               value={(passNightChoice[t.id] || {})[night.date] || ''}
                               onChange={(e) => {
                                 setPassNightChoice({
@@ -607,8 +659,9 @@ export default function PublicEventPage() {
                         )}
                       </div>
                     ) : t.on_sale && t.section_required ? (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <div className="ticket-picker-controls">
                         <select
+                          className="ticket-section-select"
                           value={sectionChoice[t.id] || ''}
                           onChange={(e) => {
                             setSectionChoice({ ...sectionChoice, [t.id]: e.target.value })
@@ -639,6 +692,7 @@ export default function PublicEventPage() {
                         </div>
                       </div>
                     ) : t.on_sale ? (
+                      <div className="ticket-picker-controls">
                       <div className="ticket-qty-stepper">
                         <button type="button" onClick={() => setQty(t, qty - 1)} disabled={qty === 0} aria-label="fewer">
                           −
@@ -648,63 +702,15 @@ export default function PublicEventPage() {
                           +
                         </button>
                       </div>
+                      </div>
                     ) : (
                       <span className="ticket-picker-offsale">{t.available === 0 ? 'Sold out' : 'Not on sale'}</span>
                     )}
-                    {t.on_sale && t.assigned_seating && (
-                      <div style={{ flexBasis: '100%', marginTop: 10 }}>
-                        {!seatMaps[t.id] ? (
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading seats…</span>
-                        ) : seatMaps[t.id].sections.length === 0 ? (
-                          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                            Seats for this ticket are still being set up — check back shortly.
-                          </span>
-                        ) : (
+                    {t.on_sale && t.assigned_seating && (seatPicks[t.id] || []).length > 0 && (
+                      <div style={{ flexBasis: '100%', marginTop: 2 }}>
+                        {(
                           <>
-                            {/* Section + seat dropdowns */}
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                              <select
-                                value={(pickDraft[t.id] || {}).section ?? ''}
-                                onChange={(e) =>
-                                  setPickDraft({ ...pickDraft, [t.id]: { section: e.target.value, seat: '' } })
-                                }
-                                aria-label="Section"
-                              >
-                                <option value="">Section…</option>
-                                {seatMaps[t.id].sections.map((sec, i) => (
-                                  <option key={i} value={String(i)}>
-                                    {sec.section_label}
-                                    {sec.row_label ? ` · ${sec.row_label}` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                              <select
-                                value={(pickDraft[t.id] || {}).seat || ''}
-                                onChange={(e) => setPickDraft({ ...pickDraft, [t.id]: { ...(pickDraft[t.id] || {}), seat: e.target.value } })}
-                                disabled={(pickDraft[t.id] || {}).section === undefined || (pickDraft[t.id] || {}).section === ''}
-                                aria-label="Seat"
-                              >
-                                <option value="">Seat…</option>
-                                {(((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])).map((x) => {
-                                  const gone = !x.available || (seatPicks[t.id] || []).includes(x.id)
-                                  return (
-                                    <option key={x.id} value={x.id} disabled={gone} style={gone ? { color: '#999' } : undefined}>
-                                      Seat {x.seat_number}
-                                      {gone ? ' — taken' : ''}
-                                    </option>
-                                  )
-                                })}
-                              </select>
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => addSeatPick(t)}
-                                disabled={!(pickDraft[t.id] || {}).seat || qtyFor(t) >= Math.min(t.max_per_order, t.available)}
-                              >
-                                Add seat
-                              </button>
-                            </div>
-                            {/* Picked chips */}
+                            {/* Picked chips (dropdowns moved inline into the row, 2026-09-05) */}
                             {(seatPicks[t.id] || []).length > 0 && (
                               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                                 {(seatPicks[t.id] || []).map((sid) => (
@@ -740,24 +746,42 @@ export default function PublicEventPage() {
 
             {totalQty > 0 && (
               <form className="ticket-buyer-form" onSubmit={handleCheckout}>
-                <input
-                  required
-                  placeholder="Your name"
-                  value={buyer.name}
-                  onChange={(e) => setBuyer({ ...buyer, name: e.target.value })}
-                />
-                <input
-                  required
-                  type="email"
-                  placeholder="you@example.com"
-                  value={buyer.email}
-                  onChange={(e) => setBuyer({ ...buyer, email: e.target.value })}
-                />
-                <input
-                  placeholder="Referral code (optional)"
-                  value={buyer.promo}
-                  onChange={(e) => setBuyer({ ...buyer, promo: e.target.value })}
-                />
+                {/* Checkout card (2026-09-05): labeled fields in a bounded
+                    card, styled entirely from the page's existing tokens so
+                    it inherits each organizer's colors and fonts. */}
+                <div className="checkout-card">
+                  <div className="checkout-card-title" style={displayFont}>Your details</div>
+                  <div className="checkout-grid">
+                    <label className="checkout-field">
+                      <span>Name</span>
+                      <input
+                        required
+                        autoComplete="name"
+                        placeholder="Jordan Rivera"
+                        value={buyer.name}
+                        onChange={(e) => setBuyer({ ...buyer, name: e.target.value })}
+                      />
+                    </label>
+                    <label className="checkout-field">
+                      <span>Email</span>
+                      <input
+                        required
+                        type="email"
+                        autoComplete="email"
+                        placeholder="you@example.com"
+                        value={buyer.email}
+                        onChange={(e) => setBuyer({ ...buyer, email: e.target.value })}
+                      />
+                    </label>
+                    <label className="checkout-field checkout-field-code">
+                      <span>Referral code <em>(optional)</em></span>
+                      <input
+                        placeholder=""
+                        value={buyer.promo}
+                        onChange={(e) => setBuyer({ ...buyer, promo: e.target.value })}
+                      />
+                    </label>
+                  </div>
                 {buyer.promo.trim() && promoInfo && (
                   <p className={promoInfo.valid ? 'ticket-promo-ok' : 'ticket-promo-bad'}>
                     {!promoInfo.valid
@@ -768,7 +792,7 @@ export default function PublicEventPage() {
                   </p>
                 )}
                 {checkoutError && <p className="ticket-checkout-error">{checkoutError}</p>}
-                <button className="btn btn-primary public-event-cta" type="submit" disabled={checkingOut}>
+                <button className="btn btn-primary public-event-cta checkout-submit" type="submit" disabled={checkingOut}>
                   {checkingOut
                     ? 'One moment…'
                     : dueCents === 0
@@ -778,6 +802,7 @@ export default function PublicEventPage() {
                 <p className="ticket-buyer-note">
                   Your tickets will be emailed to you{dueCents > 0 ? ' after payment' : ''}.
                 </p>
+                </div>
               </form>
             )}
           </div>
