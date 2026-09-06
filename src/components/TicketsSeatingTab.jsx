@@ -297,7 +297,14 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       // no ticket type, no price. Comps, priorities, and imported-sales
       // reconciliation all key off the pool itself.
       if (!selling) {
-        onToast(`"${ttName}" added — ${total} seats`)
+        if (composer.every_day && eventDays.length > 1) {
+          const clones = await api.fanOutSeatingCategory(eventId, pool.id)
+          onToast(
+            `"${ttName}" created for ${clones.length + 1} days — this one serves ${fmtDay(eventDays[0])}, each day its own independent copy`
+          )
+        } else {
+          onToast(`"${ttName}" added — ${total} seats`)
+        }
         setComposer(EMPTY_COMPOSER)
         loadEventData()
         return
@@ -762,6 +769,21 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     try {
       await api.deleteSeatingCategory(eventId, c.id)
       onToast(`"${c.name}" deleted`)
+      loadEventData()
+    } catch (err) {
+      onToast(err.message, true)
+    }
+  }
+
+  // Room list (non-native): clone a bare area to every event day.
+  const fanOutPool = async (c) => {
+    try {
+      const clones = await api.fanOutSeatingCategory(eventId, c.id)
+      onToast(
+        clones.length
+          ? `"${c.name}" copied to ${clones.length} more day${clones.length === 1 ? '' : 's'} — this one serves ${fmtDay(eventDays[0])}`
+          : 'Every day already has its copy — nothing to create'
+      )
       loadEventData()
     } catch (err) {
       onToast(err.message, true)
@@ -1261,6 +1283,18 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               </div>
             )}
 
+            {!selling && eventDays.length > 1 && (
+              <label style={{ fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center', marginTop: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={composer.every_day}
+                  onChange={(e) => setComposer({ ...composer, every_day: e.target.checked })}
+                />
+                <strong>Create for every day</strong>&nbsp;— one independent copy per day ({eventDays.length} days);
+                this one serves {fmtDay(eventDays[0])}, the copies are named with their day
+              </label>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
               <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                 {composerTotal() > 0
@@ -1597,9 +1631,10 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
           <div className="panel-title">Your room</div>
           {eventDays.length > 1 && (
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
-              This event runs multiple days. Day-by-day copies of an area are coming; until then,
-              name an area with the day (&ldquo;Row 1 (10/08)&rdquo;) and it files under that
-              day&apos;s chip above.
+              This event runs multiple days. A bare-named area serves the first night once it has
+              day-named copies; &ldquo;Every day&rdquo; on a row makes the copies (independent
+              capacity, sections, and seat reservations per day). Comps and priorities route to the
+              guest&apos;s own day automatically.
             </p>
           )}
           {(categories || []).filter((c) => poolMatchesDay(c, categories)).length === 0 ? (
@@ -1661,6 +1696,15 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                               onClick={() => (seatsOpenId === c.id ? setSeatsOpenId(null) : loadSeatsInto(c.id, c))}
                             >
                               Seats
+                            </button>
+                          )}
+                          {eventDays.length > 1 && !poolSuffixDay(c.name) && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              title="Clone this area to every event day — independent copies, named with their day"
+                              onClick={() => fanOutPool(c)}
+                            >
+                              Every day
                             </button>
                           )}
                           <button className="btn btn-danger btn-sm" onClick={() => deleteCompPool(c)}>
