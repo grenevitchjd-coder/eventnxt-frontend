@@ -13,10 +13,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 
-function centsToDollars(c) {
-  return (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 const MODE_LABELS = {
   native: 'Selling on EventNXT',
   external: 'Selling on an external platform',
@@ -33,9 +29,7 @@ export default function OverviewTab({ onToast, eventId, event, onNavigate }) {
   const [profile, setProfile] = useState(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
   const [ticketTypes, setTicketTypes] = useState(null)
-  const [guests, setGuests] = useState(null)
   const [guestTypes, setGuestTypes] = useState(null)
-  const [orders, setOrders] = useState(null)
 
   useEffect(() => {
     api.getEventSettings(eventId).then(setSettings).catch((e) => onToast(e.message, true))
@@ -47,35 +41,19 @@ export default function OverviewTab({ onToast, eventId, event, onNavigate }) {
       })
       .catch((e) => onToast(e.message, true))
     api.listTicketTypes(eventId).then(setTicketTypes).catch((e) => onToast(e.message, true))
-    api.listGuests(eventId).then(setGuests).catch((e) => onToast(e.message, true))
     api.listGuestTypes(eventId).then(setGuestTypes).catch((e) => onToast(e.message, true))
-    api.listOrders(eventId).then(setOrders).catch((e) => onToast(e.message, true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (!settings || !profileLoaded || ticketTypes === null || guests === null || guestTypes === null || orders === null)
-    return null
+  if (!settings || !profileLoaded || ticketTypes === null || guestTypes === null) return null
 
   const mode = settings.ticketing_mode
 
-  // ---------- Stats ----------
-  const paidOrders = orders.filter((o) => o.status === 'paid')
-  const ticketsSold = ticketTypes.reduce((sum, t) => sum + (t.sold || 0), 0)
-  const grossCents = paidOrders.reduce((sum, o) => sum + ((o.subtotal_cents ?? o.total_cents ?? 0) - (o.discount_cents || 0)), 0)
-  const invitees = guests.filter((g) => !g.distributed_by_guest_id) // direct invites, not delegated recipients
-  const rsvpYes = invitees.filter((g) => g.rsvp_confirmed === 'yes').length
-
-  const stats = []
-  if (mode === 'native') {
-    stats.push({ label: 'Tickets sold', value: String(ticketsSold) })
-    stats.push({ label: 'Gross sales', value: `$${centsToDollars(grossCents)}` })
-  }
-  stats.push({ label: 'RSVPs confirmed', value: `${rsvpYes} / ${invitees.length}` })
-  if (mode !== 'native') {
-    stats.push({ label: 'Guest types', value: String(guestTypes.length) })
-  }
-
   // ---------- Adaptive checklist ----------
+  // No sales/attendance stats here anymore: Overview is setup-gated, so it
+  // reads ONLY setup-area endpoints — every fetch succeeds for exactly the
+  // people who can open the page. Tickets-sold and gross live with money
+  // pages; RSVPs confirmed lives on Orders (see rsvp-summary endpoint).
   const items = []
   const add = (done, label, tab, optional = false) => items.push({ done, label, tab, optional })
 
@@ -106,7 +84,6 @@ export default function OverviewTab({ onToast, eventId, event, onNavigate }) {
       guestTypes.length > 0 ? `${guestTypes.length} guest type${guestTypes.length === 1 ? '' : 's'} defined` : 'Define your guest types',
       'workspace'
     )
-    add(invitees.length > 0, invitees.length > 0 ? `${invitees.length} guests on the list` : 'Add guests to the list', 'guests')
   }
 
   const pageDesigned = Boolean(profile && (profile.description || profile.banner_photo_url || profile.about_us))
@@ -143,17 +120,6 @@ export default function OverviewTab({ onToast, eventId, event, onNavigate }) {
           </a>
         </p>
       )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 18 }}>
-        {stats.map((s) => (
-          <div key={s.label} className="panel" style={{ marginBottom: 0 }}>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              {s.label}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4 }}>{s.value}</div>
-          </div>
-        ))}
-      </div>
 
       <div className="panel">
         <div className="panel-title">

@@ -33,6 +33,9 @@ export default function OrdersTab({ onToast, eventId }) {
   const [payouts, setPayouts] = useState(null)
   const [openingManage, setOpeningManage] = useState(false)
   const [releasing, setReleasing] = useState(false)
+  // Moved here from Overview: attendance commitment belongs with the money
+  // pages, not the setup checklist. Quietly absent if the fetch fails.
+  const [rsvpSummary, setRsvpSummary] = useState(null)
 
   useEffect(() => {
     if (!loadedEventId) return
@@ -46,6 +49,7 @@ export default function OrdersTab({ onToast, eventId }) {
   // that's needed here.
   useEffect(() => {
     loadOrders(eventId, '')
+    api.getRsvpSummary(eventId).then(setRsvpSummary).catch(() => setRsvpSummary(null))
     api.getEarnings(eventId).then(setEarnings).catch(() => {})
     api.getPayouts(eventId).then(setPayouts).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,6 +126,11 @@ export default function OrdersTab({ onToast, eventId }) {
   return (
     <>
       <div className="page-title">Orders</div>
+      {rsvpSummary && (
+        <p className="page-subtitle" style={{ marginBottom: 10 }}>
+          RSVPs confirmed: <strong>{rsvpSummary.rsvp_confirmed}</strong> / {rsvpSummary.invited} invited
+        </p>
+      )}
       <p className="page-subtitle">
         Every native ticket order for the event — search by buyer name or email. Refunds are full-order:
         the buyer gets everything back, codes void, and the tickets go back on sale.

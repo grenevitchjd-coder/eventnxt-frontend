@@ -356,6 +356,7 @@ export const api = {
     request(`/events/${eventId}/ticket-types/${ticketTypeId}`, { method: 'DELETE' }),
 
   // Orders admin
+  getRsvpSummary: (eventId) => request(`/events/${eventId}/orders/rsvp-summary`),
   listOrders: (eventId, search = '') =>
     request(`/events/${eventId}/orders${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   refundOrder: (eventId, orderId) =>
