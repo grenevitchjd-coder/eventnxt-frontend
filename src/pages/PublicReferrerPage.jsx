@@ -20,6 +20,19 @@ import { useParams } from 'react-router-dom'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
 
+// The payout agreement in one honest sentence, in the deal's own unit.
+const dealSummary = (c) => {
+  if (c.reward_type === 'flat_amount') return `You earn $${Number(c.reward_value)} per ticket sold`
+  if (c.reward_type === 'percentage') return `You earn ${Number(c.reward_value)}% of each sale`
+  if (c.reward_type === 'free_tickets')
+    return `You earn ${Number(c.reward_value)} free ticket${Number(c.reward_value) === 1 ? '' : 's'} per ticket sold`
+  if (c.reward_type === 'points') {
+    if (!c.points_rates?.length) return 'You earn points per ticket (rates being set up)'
+    return 'You earn points per ticket: ' + c.points_rates.map((r) => `${r.ticket_type} ${r.points} pts`).join(' · ')
+  }
+  return null
+}
+
 export default function PublicReferrerPage() {
   const { token } = useParams()
   const [info, setInfo] = useState(null)
@@ -204,6 +217,16 @@ export default function PublicReferrerPage() {
                     ? `${Number(c.discount_value)}% off`
                     : `$${Number(c.discount_value)} off`}
                 </span>
+              )}
+            </div>
+
+            {/* ---- The payout agreement, always visible (2026-09-05) ---- */}
+            <div style={{ margin: '2px 0 10px' }}>
+              <p style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>{dealSummary(c)}</p>
+              {c.bonus_tiers?.length > 0 && (
+                <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Volume bonuses: {c.bonus_tiers.map((t) => `${t.tickets_required} tickets → $${Number(t.bonus_value)}`).join(' · ')}
+                </p>
               )}
             </div>
 
