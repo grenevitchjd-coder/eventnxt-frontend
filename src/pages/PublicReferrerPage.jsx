@@ -31,6 +31,9 @@ export default function PublicReferrerPage() {
   const emptyRow = () => ({ name: '', email: '' })
   const [rows, setRows] = useState([emptyRow()])
   const [referNotice, setReferNotice] = useState(null)
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
+  const [messageTouched, setMessageTouched] = useState(false)
 
   useEffect(() => {
     fetch(`${API_URL}/public/rsvp/${token}`)
@@ -61,6 +64,13 @@ export default function PublicReferrerPage() {
     }
   }
 
+  const selectedCode = (info?.referral_codes || []).find(
+    (c) => c.promo_code_id === (referCodeId || info?.referral_codes?.[0]?.promo_code_id)
+  )
+  useEffect(() => {
+    if (!messageTouched) setMessage(selectedCode?.referral_message_draft || '')
+  }, [selectedCode?.promo_code_id, selectedCode?.referral_message_draft, messageTouched])
+
   const handleRefer = async () => {
     const contacts = rows.filter((r) => r.name.trim() && r.email.trim())
     if (contacts.length === 0) {
@@ -76,7 +86,12 @@ export default function PublicReferrerPage() {
       const res = await fetch(`${API_URL}/public/rsvp/${token}/refer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ promo_code_id: codeId, contacts }),
+        body: JSON.stringify({
+          promo_code_id: codeId,
+          contacts,
+          subject: subject.trim() || null,
+          message: message.trim() || null,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Something went wrong')
@@ -141,6 +156,23 @@ export default function PublicReferrerPage() {
               </select>
             </div>
           )}
+          <div className="field" style={{ marginBottom: 8 }}>
+            <label>Subject</label>
+            <input maxLength={150} value={subject}
+                   placeholder={`${info.guest_name} invited you to the event`}
+                   onChange={(e) => setSubject(e.target.value)} />
+          </div>
+          <div className="field" style={{ marginBottom: 10 }}>
+            <label>Your message</label>
+            <textarea rows={4} maxLength={2000} value={message}
+                      style={{ width: '100%', minWidth: 0 }}
+                      placeholder="Write it in your own words — why should they come?"
+                      onChange={(e) => { setMessage(e.target.value); setMessageTouched(true) }} />
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              Each person's tracked link{selectedCode?.discount_type ? ' and their discount' : ''} is added
+              automatically below your message, with a short "sent through EventNXT on your behalf" line.
+            </p>
+          </div>
           {rows.map((row, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <input placeholder="Name" value={row.name} style={{ flex: 1, minWidth: 140 }}
