@@ -52,7 +52,8 @@ export default function ReferralTermsPage() {
         The reward terms for each of your codes — per-ticket amounts, percentages, points rates, and any
         volume bonus tiers — are displayed on your referral portal (&ldquo;Your progress&rdquo;). Those are
         the effective terms, and rewards accrue at the terms in effect at the time each qualifying sale
-        occurs.
+        occurs. Your acceptance of these Terms is recorded together with the full legal name you type
+        when you first unlock your portal.
       </p>
 
       <H3>1.2 Terms can change for future sales</H3>

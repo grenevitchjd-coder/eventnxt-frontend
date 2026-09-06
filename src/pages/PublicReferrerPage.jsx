@@ -41,6 +41,12 @@ export default function PublicReferrerPage() {
   const [submitError, setSubmitError] = useState(null)
   const [tab, setTab] = useState('progress') // 'progress' | 'refer'
   const [policyChecked, setPolicyChecked] = useState(false) // 0051: Outreach Policy checkbox (first send only)
+  // 0052: the payout-terms WALL — nothing referral-facing renders until
+  // the referrer checks the box and types their full legal name.
+  const [legalName, setLegalName] = useState('')
+  const [wallChecked, setWallChecked] = useState(false)
+  const [wallSubmitting, setWallSubmitting] = useState(false)
+  const [wallError, setWallError] = useState(null)
   const [referCodeId, setReferCodeId] = useState(null)
   const emptyRow = () => ({ name: '', email: '' })
   const [rows, setRows] = useState([emptyRow()])
@@ -124,6 +130,25 @@ export default function PublicReferrerPage() {
     }
   }
 
+  const handleAcceptTerms = async () => {
+    setWallSubmitting(true)
+    setWallError(null)
+    try {
+      const res = await fetch(`${API_URL}/public/rsvp/${token}/accept-payout-terms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legal_name: legalName.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Something went wrong')
+      setInfo(data) // the refreshed payload now carries the codes — the portal unlocks
+    } catch (err) {
+      setWallError(err.message)
+    } finally {
+      setWallSubmitting(false)
+    }
+  }
+
   if (error) {
     return (
       <div className="public-page" style={{ maxWidth: 560, margin: '60px auto', padding: '0 16px' }}>
@@ -134,6 +159,49 @@ export default function PublicReferrerPage() {
   if (!info) return null
 
   const codes = info.referral_codes || []
+
+  // 0052: the wall replaces BOTH tabs until signed.
+  if (info.payout_terms_required) {
+    return (
+      <div className="public-page" style={{ maxWidth: 560, margin: '40px auto', padding: '0 16px' }}>
+        <h1 style={{ marginBottom: 4 }}>Hi {info.guest_name}</h1>
+        <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
+          One step before your referral code and share link unlock.
+        </p>
+        <div className="panel" style={{ textAlign: 'left', marginTop: 14 }}>
+          <div className="panel-title">Referral Program Terms</div>
+          <p style={{ fontSize: 13.5, marginTop: 4 }}>
+            The short version: your payout terms for each code are shown on this portal, and rewards
+            accrue at the terms in effect when each sale happens. The organizer may adjust terms for
+            <strong> future</strong> sales — so later payouts won&apos;t necessarily match your initial
+            terms — and this portal always shows the current ones. Bonuses you&apos;ve already crossed are
+            final, and payouts settle after the event, net of refunds. Sending invites through the
+            platform also has outreach rules you&apos;ll accept before your first send.
+          </p>
+          <p style={{ fontSize: 13.5 }}>
+            Please read the full{' '}
+            <a href="/terms/referral" target="_blank" rel="noreferrer">Referral Program Terms</a>, then
+            sign below.
+          </p>
+          <div className="field" style={{ maxWidth: 320, marginTop: 12 }}>
+            <label>Your full legal name</label>
+            <input value={legalName} maxLength={150} placeholder="First and last name"
+                   onChange={(e) => setLegalName(e.target.value)} />
+          </div>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={wallChecked} onChange={(e) => setWallChecked(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>I have read and agree to the Referral Program Terms, and the name above is my full legal name.</span>
+          </label>
+          {wallError && <p style={{ color: 'var(--danger, #b3261e)', fontSize: 13, marginTop: 8 }}>{wallError}</p>}
+          <button className="btn btn-secondary" style={{ marginTop: 12 }}
+                  disabled={wallSubmitting || !wallChecked || legalName.trim().length < 3}
+                  onClick={handleAcceptTerms}>
+            Agree &amp; unlock my referral link
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="public-page" style={{ maxWidth: 640, margin: '40px auto', padding: '0 16px' }}>
