@@ -667,6 +667,28 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const typeMatchesDay = (t) =>
     dayFilter === 'all' ? true : dayFilter === 'undated' ? !t.valid_date : t.valid_date === dayFilter
   const visibleTicketTypes = (ticketTypes || []).filter(typeMatchesDay)
+  // Pools follow the same day rules as the Seating summary page: dated
+  // clones by their name suffix; a bare family anchor with dated
+  // siblings is the first night's pool; a bare pool with none is
+  // undated (all-days).
+  const famBaseName = (name) => String(name || '').replace(/\s*\(\d{2}\/\d{2}\)$/, '')
+  const poolSuffixDay = (name) => {
+    const m = String(name || '').match(/\((\d{2})\/(\d{2})\)$/)
+    if (!m) return null
+    return eventDays.find((d) => d.slice(5) === `${m[1]}-${m[2]}`) || `${m[1]}/${m[2]}`
+  }
+  const poolDayOf = (pool, all) => {
+    const sfx = poolSuffixDay(pool.name)
+    if (sfx) return sfx
+    const base = famBaseName(pool.name)
+    const hasDatedSiblings = (all || []).some((p) => p.id !== pool.id && famBaseName(p.name) === base && poolSuffixDay(p.name))
+    return hasDatedSiblings ? eventDays[0] || null : null
+  }
+  const poolMatchesDay = (pool, all) => {
+    if (dayFilter === 'all') return true
+    const d = poolDayOf(pool, all)
+    return dayFilter === 'undated' ? d === null : d === dayFilter
+  }
   const fmtChipDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })
   const compPools = (categories || []).filter((c) => !soldPoolIds.has(c.id))
 
@@ -1040,31 +1062,32 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         </div>
       )}
 
+      {eventDays.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
+          <button className={`btn btn-sm ${dayFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDayFilter('all')}>
+            All
+          </button>
+          {eventDays.map((d) => (
+            <button
+              key={d}
+              className={`btn btn-sm ${dayFilter === d ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setDayFilter(d)}
+            >
+              {fmtChipDay(d)}
+            </button>
+          ))}
+          <button
+            className={`btn btn-sm ${dayFilter === 'undated' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setDayFilter('undated')}
+            title="Passes, all-days types, and areas not tied to one night"
+          >
+            All-days
+          </button>
+        </div>
+      )}
+
       {selling && (
         <>
-        {eventDays.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
-            <button className={`btn btn-sm ${dayFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDayFilter('all')}>
-              All
-            </button>
-            {eventDays.map((d) => (
-              <button
-                key={d}
-                className={`btn btn-sm ${dayFilter === d ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setDayFilter(d)}
-              >
-                {fmtChipDay(d)}
-              </button>
-            ))}
-            <button
-              className={`btn btn-sm ${dayFilter === 'undated' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setDayFilter('undated')}
-              title="Passes and types not tied to one night"
-            >
-              All-days
-            </button>
-          </div>
-        )}
         <table className="data-table" style={{ marginBottom: 28 }}>
           <thead>
             <tr>
@@ -1536,7 +1559,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         {compPools.length > 0 && (
           <table className="data-table" style={{ marginTop: 12 }}>
             <tbody>
-              {compPools.map((c) => (
+              {compPools.filter((c) => poolMatchesDay(c, categories)).map((c) => (
                 <tr key={c.id}>
                   <td>
                     {c.name}
