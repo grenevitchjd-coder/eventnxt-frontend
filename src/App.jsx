@@ -4,6 +4,7 @@ import AuthComplete from './pages/AuthComplete'
 import Dashboard from './pages/Dashboard'
 import PublicEventPage from './pages/PublicEventPage'
 import PublicRSVPPage from './pages/PublicRSVPPage'
+import PublicReferrerPage from './pages/PublicReferrerPage'
 import PublicOrderPage from './pages/PublicOrderPage'
 import ScanPage from './pages/ScanPage'
 import { isAuthenticated } from './api'
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/e/:slug/order/:token" element={<PublicOrderPage />} />
         {/* Public — no auth. A specific guest's own RSVP / ticket-distribution link. */}
         <Route path="/rsvp/:token" element={<PublicRSVPPage />} />
+        <Route path="/referrer/:token" element={<PublicReferrerPage />} />
         {/* Auth required — the door scanner, mobile-first. */}
         <Route
           path="/checkin/:eventId"

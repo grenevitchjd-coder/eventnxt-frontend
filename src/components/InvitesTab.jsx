@@ -859,7 +859,8 @@ export default function InvitesTab({ onToast, eventId }) {
   // (door roster) page. Counts shown on this page are counts of
   // INVITEES — people who can ever appear here — never of all guests.
   const invitees = (guests || []).filter(
-    (g) => !g.allocated_by_guest_id && (g.effective_mode || 'invite') !== 'distribute'
+    // Referrer-only people (0043) belong to Referral setup — never invitees.
+    (g) => !g.allocated_by_guest_id && !g.is_referrer_only && (g.effective_mode || 'invite') !== 'distribute'
   )
   const elsewhereCount = (guests || []).length - invitees.length
   const unsentCount = invitees.filter((g) => !g.link_sent_at).length

@@ -320,6 +320,13 @@ export const api = {
   // Sales
   listSales: (eventId) => request(`/events/${eventId}/sales`),
   getPromoStats: (eventId) => request(`/events/${eventId}/promo-stats`),
+  createReferrer: (eventId, payload) =>
+    request(`/events/${eventId}/referrers`, { method: 'POST', body: JSON.stringify(payload) }),
+  sendReferrerPortalLink: (eventId, guestId, portalBaseUrl) =>
+    request(`/events/${eventId}/referrers/${guestId}/send-portal-link`, {
+      method: 'POST',
+      body: JSON.stringify({ portal_base_url: portalBaseUrl }),
+    }),
   importSales: (eventId, rows) =>
     request(`/events/${eventId}/sales/import`, { method: 'POST', body: JSON.stringify({ rows }) }),
 
