@@ -255,6 +255,7 @@ export const api = {
   managePaymentsLink: (eventId) => request(`/events/${eventId}/payments/manage-link`, { method: 'POST' }),
   getEarnings: (eventId) => request(`/events/${eventId}/payments/earnings`),
   getPayouts: (eventId) => request(`/events/${eventId}/payments/payouts`),
+  releaseReserve: (eventId) => request(`/events/${eventId}/payments/release-reserve`, { method: 'POST' }),
 
   // Event settings — the operating profile (ticketing mode / sales source /
   // comp delivery). GET infers for events that never chose.

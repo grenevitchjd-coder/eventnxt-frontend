@@ -32,6 +32,7 @@ export default function OrdersTab({ onToast, eventId }) {
   const [earnings, setEarnings] = useState(null)
   const [payouts, setPayouts] = useState(null)
   const [openingManage, setOpeningManage] = useState(false)
+  const [releasing, setReleasing] = useState(false)
 
   useEffect(() => {
     if (!loadedEventId) return
@@ -49,6 +50,21 @@ export default function OrdersTab({ onToast, eventId }) {
     api.getPayouts(eventId).then(setPayouts).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const handleReleaseReserve = async () => {
+    if (!window.confirm(`Release the held reserve of ${money(earnings.reserve_held_cents, earnings.currency)} to your Stripe balance?\n\nAfter release, card-processing costs for any further refunds on this event are no longer covered by the reserve.`)) return
+    setReleasing(true)
+    try {
+      const res = await api.releaseReserve(eventId)
+      onToast(`Released ${money(res.released_cents, earnings.currency)} across ${res.orders_count} orders`)
+      api.getEarnings(eventId).then(setEarnings).catch(() => {})
+      api.getPayouts(eventId).then(setPayouts).catch(() => {})
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setReleasing(false)
+    }
+  }
 
   const handleManagePayments = async () => {
     setOpeningManage(true)
@@ -86,7 +102,7 @@ export default function OrdersTab({ onToast, eventId }) {
         `Refund ${order.buyer_name}'s order in full (${summary}, ${money(
           order.subtotal_cents - order.discount_cents,
           order.currency
-        )})?\n\nThe buyer gets 100% back, their ticket codes stop working, and the tickets return to the sellable pool. Stripe's card-processing fee from the original charge is not returned. This can't be undone.`
+        )})?\n\nThe buyer gets 100% back, their ticket codes stop working, and the tickets return to the sellable pool. The card-processing cost of the refund comes out of this order's held reserve. This can't be undone.`
       )
     )
       return
@@ -133,6 +149,33 @@ export default function OrdersTab({ onToast, eventId }) {
               </div>
             ))}
           </div>
+          {(earnings.reserve_held_cents > 0 || earnings.reserve_released_cents > 0 || earnings.reserve_used_cents > 0) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Held in reserve</div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>{money(earnings.reserve_held_cents, earnings.currency)}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>releases after the event&apos;s last day</div>
+              </div>
+              {earnings.reserve_released_cents > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Reserve released</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{money(earnings.reserve_released_cents, earnings.currency)}</div>
+                </div>
+              )}
+              {earnings.reserve_used_cents > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Used on refunds</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{money(earnings.reserve_used_cents, earnings.currency)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>card-processing costs of refunded orders</div>
+                </div>
+              )}
+              {earnings.reserve_releasable && (
+                <button className="btn btn-primary btn-sm" onClick={handleReleaseReserve} disabled={releasing} style={{ marginLeft: 'auto' }}>
+                  {releasing ? 'Releasing\u2026' : `Release reserve (${money(earnings.reserve_held_cents, earnings.currency)})`}
+                </button>
+              )}
+            </div>
+          )}
           {payouts?.connected && (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>

@@ -525,10 +525,12 @@ export default function EventSettingsTab({ onToast, eventId, event }) {
         </div>
         {settings.ticketing_mode === 'native' && (
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
-            Worth knowing when selling on EventNXT: a refund returns 100% to the buyer and EventNXT
-            gives back its platform fee, but Stripe never returns the card-processing fee from the
-            original charge &mdash; every refund still carries that processing cost even though the sale
-            is undone. Factor that into how generous a policy you offer.
+            Worth knowing when selling on EventNXT: a small reserve (about 2.9% + 30&cent; per order,
+            matching Stripe&apos;s card-processing cost) is held from each sale&apos;s payout until after the
+            event. Refunds return 100% to the buyer, and the card-processing fee &mdash; which Stripe never
+            gives back &mdash; is covered from that order&apos;s reserve. After your event ends, the unused
+            reserve is released to your Stripe balance from the Orders page. Factor the processing cost
+            of refunds into how generous a policy you offer.
           </p>
         )}
       </div>
