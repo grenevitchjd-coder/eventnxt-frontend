@@ -33,6 +33,7 @@ export default function PromoTrackingTab({ onToast, eventId }) {
   const [stats, setStats] = useState(null) // self promos only
   const [sales, setSales] = useState(null)
   const [salesConfig, setSalesConfig] = useState(null)
+  const [settings, setSettings] = useState(null)
   const [expandedId, setExpandedId] = useState(null) // code id | 'none' | null
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function PromoTrackingTab({ onToast, eventId }) {
       .catch((e) => onToast(e.message, true))
     api.listSales(eventId).then(setSales).catch((e) => onToast(e.message, true))
     api.getSalesConfig(eventId).then(setSalesConfig).catch((e) => onToast(e.message, true))
+    api.getEventSettings(eventId).then(setSettings).catch(() => setSettings(null))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSetPlatform = async (platform) => {
@@ -201,7 +203,18 @@ export default function PromoTrackingTab({ onToast, eventId }) {
             </p>
           )}
 
-          {/* ---------- Sales platform (where sale data comes from) ---------- */}
+          {/* ---------- Sales platform (where sale data comes from) ----------
+              Settings-aware: a purely native event has no outside
+              platform to declare. Shown when sales_source isn't native
+              OR imported rows already exist (never hide the source of
+              numbers that are in the totals above). */}
+          {settings && settings.sales_source === 'native' &&
+           !(sales || []).some((s) => s.source === 'csv_upload') ? (
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Selling some tickets outside EventNXT? Switch your sales data source in Event settings to
+              connect a platform and import its sales.
+            </p>
+          ) : (
           <div className="panel">
             <div className="panel-title">Sales platform</div>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
@@ -225,6 +238,7 @@ export default function PromoTrackingTab({ onToast, eventId }) {
               </div>
             </div>
           </div>
+          )}
         </>
       )}
     </div>

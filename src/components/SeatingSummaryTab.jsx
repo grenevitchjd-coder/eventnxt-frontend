@@ -64,6 +64,7 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
   const [summary, setSummary] = useState(null) // pool-level rows
   const [pools, setPools] = useState(null) // per-section decomposition
   const [dayFilter, setDayFilter] = useState('all') // 'all' | iso date | 'undated'
+  const [hasCsvSales, setHasCsvSales] = useState(false)
 
   const loadEventData = (id) => {
     setSummary(null)
@@ -72,11 +73,13 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
       api.getEventSettings(id).catch(() => null),
       api.getSeatingSummary(id),
       api.getSectionSummary(id),
+      api.listSales(id).catch(() => []),
     ])
-      .then(([s, sum, secs]) => {
+      .then(([s, sum, secs, saleRows]) => {
         setSettings(s)
         setSummary(sum)
         setPools(secs)
+        setHasCsvSales((saleRows || []).some((x) => x.source === 'csv_upload'))
         setLoadedEventId(id)
       })
       .catch((err) => onToast(err.message, true))
@@ -300,7 +303,18 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
         </table>
       </div>
 
-      {/* ---------- Sales import (moved here from Promos) ---------- */}
+      {/* ---------- Sales import (moved here from Promos) ----------
+          Settings-aware (Joshua's question 2026-09-05): a purely native
+          event shouldn't stare at an importer it never needs. Shown when
+          the event's sales_source isn't native, OR when imported rows
+          already exist — hiding the source of numbers that are visibly
+          in the Sold column would be the display lying about its data. */}
+      {settings && settings.sales_source === 'native' && !hasCsvSales ? (
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 20 }}>
+          Selling some tickets outside EventNXT? Switch your sales data source in Event settings to
+          import them here.
+        </p>
+      ) : (
       <div className="panel" style={{ marginTop: 20 }}>
         <div className="panel-title">Import box office sales</div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
@@ -325,6 +339,7 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
           </button>
         </div>
       </div>
+      )}
 
       {stagedSaleRows && (
         <div className="panel">
