@@ -86,7 +86,7 @@ export default function OrdersTab({ onToast, eventId }) {
         `Refund ${order.buyer_name}'s order in full (${summary}, ${money(
           order.subtotal_cents - order.discount_cents,
           order.currency
-        )})?\n\nThe buyer gets 100% back, their ticket codes stop working, and the tickets return to the sellable pool. This can't be undone.`
+        )})?\n\nThe buyer gets 100% back, their ticket codes stop working, and the tickets return to the sellable pool. Stripe's card-processing fee from the original charge is not returned. This can't be undone.`
       )
     )
       return

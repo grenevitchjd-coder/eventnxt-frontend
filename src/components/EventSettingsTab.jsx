@@ -523,6 +523,14 @@ export default function EventSettingsTab({ onToast, eventId, event }) {
             {savingPolicy ? 'Saving…' : 'Save policy'}
           </button>
         </div>
+        {settings.ticketing_mode === 'native' && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 0 }}>
+            Worth knowing when selling on EventNXT: a refund returns 100% to the buyer and EventNXT
+            gives back its platform fee, but Stripe never returns the card-processing fee from the
+            original charge &mdash; every refund still carries that processing cost even though the sale
+            is undone. Factor that into how generous a policy you offer.
+          </p>
+        )}
       </div>
 
       <div className="panel">
