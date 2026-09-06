@@ -15,13 +15,20 @@
 // visible); any other group the user opens is remembered in localStorage.
 //
 // Check-in is a TOP-LEVEL item, not a Manage child: it's a live door tool
-// that opens in its own tab, and it's the future landing point for
-// restricted roles. When per-role gating lands (Events360 roles arrive on
-// me.role, already fetched below), door-staff roles will render Overview
-// and the three group toggles with disabled={true} — the CSS for that
-// state already exists (.nav-item:disabled / .nav-group-toggle:disabled) —
-// leaving Check-in as the only live control. Same layout for every role,
-// just fewer things enabled.
+// that opens in its own tab, and the landing point for restricted roles.
+//
+// ROLE GATING (live): me.permissions carries the Events360 grants — the
+// SAME payload the backend enforces 403s with, so what's greyed here and
+// what's refused there can never disagree. Rules: a group whose pages are
+// all disallowed renders its toggle disabled and LOCKED (it won't open —
+// a check-in-only person can't even see what's inside); a partially
+// allowed group opens but greys its disallowed pages; Overview needs the
+// SETUP area (its checklist reads setup endpoints — anyone else would
+// just collect 403s there); Check-in needs the checkin grant. If the active tab
+// becomes disallowed (login, or switching to an event where an
+// event-scoped role doesn't apply), we land on the first allowed page,
+// falling back to a check-in-only notice in the main pane. A me payload
+// without permissions (pre-bridge Events360) gates nothing.
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, getNewEventUrl } from '../api'
@@ -83,6 +90,41 @@ const NAV_GROUPS = [
     ],
   },
 ]
+
+// Which permission AREA each tab belongs to (mirrors the backend's
+// route->area map in eventnxt-backend/app/services/permissions.py).
+const TAB_AREAS = {
+  settings: 'setup',
+  tickets: 'setup',
+  workspace: 'setup',
+  home: 'setup',
+  'seating-summary': 'setup',
+  promos: 'promotion',
+  'referral-setup': 'promotion',
+  'promo-tracking': 'money',
+  'referral-payouts': 'money',
+  orders: 'money',
+  invites: 'guests',
+  allotments: 'guests',
+  guests: 'guest_list',
+}
+
+// A view OR manage grant on the area makes its pages visible; writes are
+// enforced server-side. null grants (owner/org_admin, or a pre-bridge
+// Events360 payload with no permissions field) mean everything.
+const grantsForEvent = (me, eventId) => {
+  const perms = me?.permissions
+  if (!perms || perms.all) return null
+  const set = new Set(perms.org_wide || [])
+  for (const key of (perms.by_event || {})[eventId] || []) set.add(key)
+  return set
+}
+
+const hasArea = (granted, area) => {
+  if (granted === null) return true
+  if (area === 'checkin') return granted.has('eventnxt.checkin')
+  return granted.has(`eventnxt.${area}.view`) || granted.has(`eventnxt.${area}.manage`)
+}
 
 const loadOpenGroups = () => {
   try {
@@ -182,6 +224,33 @@ export default function Dashboard() {
 
   const currentEvent = events?.find((ev) => ev.id === eventId) || null
 
+  // ---- Role gating (derived fresh on every render: me + current event) ----
+  const granted = grantsForEvent(me, eventId)
+  const tabAllowed = (key) => hasArea(granted, TAB_AREAS[key])
+  const checkinAllowed = hasArea(granted, 'checkin')
+  // Overview renders the setup checklist (settings/ticket-type reads) —
+  // gate it on the setup area so restricted roles never land on a page
+  // whose every fetch 403s.
+  const overviewAllowed = hasArea(granted, 'setup')
+  const firstAllowedTab = () => {
+    if (overviewAllowed) return 'overview'
+    for (const group of NAV_GROUPS) {
+      const t = group.tabs.find((t) => tabAllowed(t.key))
+      if (t) return t.key
+    }
+    return null // check-in only (or nothing)
+  }
+
+  // If the active tab is disallowed for this role + event, move somewhere
+  // legal. Runs after me/events load and again on every event switch —
+  // event-scoped roles can allow a page on one event and not another.
+  useEffect(() => {
+    if (!me || !eventId) return
+    const ok = tab === 'overview' ? overviewAllowed : tabAllowed(tab)
+    if (!ok) setTab(firstAllowedTab() || 'overview')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, eventId, tab])
+
   const renderTab = () => {
     if (events === null) return null // still loading the events list
     if (events.length === 0) {
@@ -195,6 +264,23 @@ export default function Dashboard() {
       )
     }
     if (!currentEvent) return null
+    if (me && !overviewAllowed && firstAllowedTab() === null) {
+      // Check-in-only role (or no grants at all for this event)
+      return (
+        <div className="data-table">
+          <div className="empty-state">
+            {checkinAllowed ? (
+              <>
+                Your role covers check-in for this event. Use the Check-in button in the
+                sidebar to open the door tool.
+              </>
+            ) : (
+              <>Your role doesn&apos;t include access to this event. Ask your org admin.</>
+            )}
+          </div>
+        </div>
+      )
+    }
     const props = { onToast: showToast, eventId, event: currentEvent, onNavigate: setTab }
     switch (tab) {
       case 'overview':
@@ -286,18 +372,24 @@ export default function Dashboard() {
         <button
           className={`nav-item ${tab === 'overview' ? 'active' : ''}`}
           style={{ marginBottom: 8 }}
+          disabled={!overviewAllowed}
           onClick={() => setTab('overview')}
         >
           Overview
         </button>
 
         {NAV_GROUPS.map((group) => {
+          const groupAllowed = group.tabs.some((t) => tabAllowed(t.key))
           const containsActive = group.tabs.some((t) => t.key === tab)
-          const isOpen = containsActive || openGroups[group.key] === true
+          // A fully-disallowed group is LOCKED: the toggle is disabled and
+          // the group can never open — its contents aren't for this role.
+          const isOpen = groupAllowed && (containsActive || openGroups[group.key] === true)
           return (
             <div key={group.key} className="nav-group">
               <button
                 className={`nav-group-toggle ${isOpen ? 'open' : ''}`}
+                disabled={!groupAllowed}
+                title={groupAllowed ? undefined : 'Your role doesn\u2019t include this area'}
                 onClick={() => toggleGroup(group.key)}
                 aria-expanded={isOpen}
               >
@@ -312,6 +404,8 @@ export default function Dashboard() {
                     <button
                       key={t.key}
                       className={`nav-item ${tab === t.key ? 'active' : ''}`}
+                      disabled={!tabAllowed(t.key)}
+                      title={tabAllowed(t.key) ? undefined : 'Your role doesn\u2019t include this page'}
                       onClick={() => setTab(t.key)}
                     >
                       {t.label}
@@ -325,7 +419,8 @@ export default function Dashboard() {
 
         <button
           className="nav-item nav-checkin"
-          disabled={!eventId}
+          disabled={!eventId || !checkinAllowed}
+          title={checkinAllowed ? undefined : 'Your role doesn\u2019t include check-in'}
           onClick={() => window.open(`/checkin/${eventId}`, '_blank')}
         >
           Check-in ↗
