@@ -215,9 +215,9 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
     <>
       <div className="page-title">Seating summary</div>
       <p className="page-subtitle">
-        Where every seat stands — bought at the box office, given as comps, or still open — per section, with the
+        Where every seat stands — sold at the box office, given as comps, or still open — per section, with the
         same numbers checkout and automatic placement enforce. Import outside sales at the bottom and watch the
-        Bought column move.
+        Sold column move.
       </p>
 
       {eventDays.length > 0 && (
@@ -244,17 +244,17 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
         </div>
       )}
 
-      <div className="table-scroll">
+      <div className="sticky-table">
         <table className="data-table">
           <thead>
             <tr>
               <th>Area</th>
               <th>Section</th>
               <th title="Sellable/seatable heads in this section">Capacity</th>
-              <th title="Box office heads: paid and pending orders × admits, plus imported sales">Bought</th>
-              <th title="Comp heads placed here: confirmed guests plus pending pull-now">Given</th>
+              <th title="Box office heads: paid and pending orders × admits, plus imported sales">Sold</th>
+              <th title="Comp heads placed here: confirmed guests plus pending pull-now">Comps</th>
               <th className="col-flex" title="Room left — the same number checkout and automatic placement enforce">
-                Left
+                Avail.
               </th>
             </tr>
           </thead>
@@ -307,7 +307,7 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
           Columns: Buyer Name, Buyer Email, Amount, Ticket Type, Quantity (defaults to 1), Promo Code
           (optional), Sale Date, External Transaction ID (recommended — prevents double-counting if you
           re-upload the same export later). Ticket Type is matched to the area by name, so imports land in the
-          Bought column above.
+          Sold column above.
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input

@@ -546,6 +546,25 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+/* A vertically scrolling table whose header row stays frozen — the
+   Seating summary uses this so section rows can run long while the
+   column names stay in view. (Sticky needs the scroll container to be
+   THIS wrapper; the generic .table-scroll's overflow-x breaks it.) */
+.sticky-table {
+  max-height: 72vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sticky-table > .data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--border);
+}
+
 .meta-label {
   display: block;
   font-size: 10.5px;
