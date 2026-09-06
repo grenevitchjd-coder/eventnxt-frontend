@@ -40,6 +40,7 @@ export default function PublicReferrerPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const [tab, setTab] = useState('progress') // 'progress' | 'refer'
+  const [policyChecked, setPolicyChecked] = useState(false) // 0051: Outreach Policy checkbox (first send only)
   const [referCodeId, setReferCodeId] = useState(null)
   const emptyRow = () => ({ name: '', email: '' })
   const [rows, setRows] = useState([emptyRow()])
@@ -90,6 +91,10 @@ export default function PublicReferrerPage() {
       setSubmitError('Add at least one name and email.')
       return
     }
+    if (!info.outreach_terms_accepted_at && !policyChecked) {
+      setSubmitError('Please read and accept the Referral Outreach Policy first.')
+      return
+    }
     const codeId = referCodeId || (info.referral_codes?.[0]?.promo_code_id ?? null)
     if (!codeId) return
     setSubmitting(true)
@@ -104,6 +109,7 @@ export default function PublicReferrerPage() {
           contacts,
           subject: subject.trim() || null,
           message: message.trim() || null,
+          outreach_terms_accepted: policyChecked || undefined,
         }),
       })
       const data = await res.json()
@@ -194,11 +200,34 @@ export default function PublicReferrerPage() {
                      onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
             </div>
           ))}
+          {!info.outreach_terms_accepted_at ? (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', margin: '12px 0 4px', fontSize: 12.5 }}>
+              <strong>Before your first send:</strong> invitations go out through EventNXT&apos;s email
+              system in your name. Only invite people you personally know — no purchased or bulk lists —
+              keep your message truthful, and don&apos;t remove the tracked link or the
+              &ldquo;sent through EventNXT&rdquo; line (they&apos;re added automatically). Abuse can void
+              rewards and sending access.
+              <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={policyChecked} onChange={(e) => setPolicyChecked(e.target.checked)} style={{ marginTop: 3 }} />
+                <span>
+                  I have read and agree to the{' '}
+                  <a href="/terms/referral" target="_blank" rel="noreferrer">Referral Outreach Policy</a>.
+                </span>
+              </label>
+            </div>
+          ) : (
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '10px 0 2px' }}>
+              Outreach Policy accepted {new Date(info.outreach_terms_accepted_at).toLocaleDateString()} ·{' '}
+              <a href="/terms/referral" target="_blank" rel="noreferrer">view</a>
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button className="btn btn-ghost btn-small" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
               + Another person
             </button>
-            <button className="btn btn-secondary btn-small" disabled={submitting} onClick={handleRefer}>
+            <button className="btn btn-secondary btn-small"
+                    disabled={submitting || (!info.outreach_terms_accepted_at && !policyChecked)}
+                    onClick={handleRefer}>
               Send invites
             </button>
           </div>
@@ -207,7 +236,15 @@ export default function PublicReferrerPage() {
       ) : codes.length === 0 ? (
         <p className="empty-state">No referral codes on this link yet — check with the organizer.</p>
       ) : (
-        codes.map((c) => (
+        <>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 0', textAlign: 'left' }}>
+          Each card below shows your <strong>current effective payout terms</strong> — rewards accrue at
+          the terms in effect when each sale happens. The organizer may adjust terms for future sales, so
+          later payouts won&apos;t necessarily match your initial terms; this page always shows the current
+          ones, and bonuses you&apos;ve already crossed are final. Payouts settle after the event, net of
+          refunds. <a href="/terms/referral" target="_blank" rel="noreferrer">Full referral terms</a>.
+        </p>
+        {codes.map((c) => (
           <div key={c.promo_code_id} className="panel" style={{ textAlign: 'left', marginTop: 20 }}>
             <div className="panel-title">
               Code <span className="mono">{c.code}</span>
@@ -374,7 +411,8 @@ export default function PublicReferrerPage() {
               </table>
             )}
           </div>
-        ))
+        ))}
+        </>
       )}
     </div>
   )

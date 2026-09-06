@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import PublicEventPage from './pages/PublicEventPage'
 import PublicRSVPPage from './pages/PublicRSVPPage'
 import PurchaseTermsPage from './pages/PurchaseTermsPage'
+import ReferralTermsPage from './pages/ReferralTermsPage'
 import PublicReferrerPage from './pages/PublicReferrerPage'
 import PublicOrderPage from './pages/PublicOrderPage'
 import ScanPage from './pages/ScanPage'
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/rsvp/:token" element={<PublicRSVPPage />} />
         {/* Public, static — the checkout agree-box links here (new tab). */}
         <Route path="/terms/purchase" element={<PurchaseTermsPage />} />
+        <Route path="/terms/referral" element={<ReferralTermsPage />} />
         <Route path="/referrer/:token" element={<PublicReferrerPage />} />
         {/* Auth required — the door scanner, mobile-first. */}
         <Route
