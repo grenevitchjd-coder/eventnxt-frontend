@@ -557,12 +557,25 @@ a:focus-visible {
   border-radius: 10px;
 }
 
+/* border-collapse: collapse silently disables position: sticky on
+   header cells in several engines — the classic sticky-table trap.
+   This table opts into separate borders so the freeze actually works. */
+.sticky-table > .data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
 .sticky-table > .data-table th {
   position: sticky;
   top: 0;
   background: var(--surface);
   z-index: 2;
   box-shadow: 0 1px 0 var(--border);
+  border-bottom: none;
+}
+
+.sticky-table > .data-table td {
+  border-top: 1px solid var(--border);
 }
 
 .meta-label {
