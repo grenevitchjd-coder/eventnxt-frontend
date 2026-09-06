@@ -18,6 +18,8 @@ import { api } from '../api'
 const SALE_HEADER_ALIASES = {
   buyername: 'buyer_name',
   name: 'buyer_name',
+  lastname: 'last_name',
+  firstname: 'first_name',
   buyeremail: 'buyer_email',
   email: 'buyer_email',
   amount: 'amount',
@@ -34,6 +36,10 @@ const SALE_HEADER_ALIASES = {
   externaltransactionid: 'external_transaction_id',
   orderid: 'external_transaction_id',
   transactionid: 'external_transaction_id',
+  barcode: 'external_transaction_id',
+  discounts: 'discount_text',
+  discount: 'discount_text',
+  coupon: 'discount_text',
 }
 
 const normalizeSaleHeader = (h) => (h || '').toString().toLowerCase().replace(/[^a-z]/g, '')
@@ -45,8 +51,11 @@ function saleRowsFromRecords(records) {
       const field = SALE_HEADER_ALIASES[normalizeSaleHeader(rawKey)]
       if (field) mapped[field] = (value ?? '').toString().trim()
     }
+    // Box-office exports split the buyer into Last Name / First Name
+    // columns — join them when there's no single name column.
+    const joined = [mapped.first_name, mapped.last_name].filter(Boolean).join(' ')
     return {
-      buyer_name: mapped.buyer_name || '',
+      buyer_name: mapped.buyer_name || joined || '',
       buyer_email: mapped.buyer_email || '',
       amount: mapped.amount || '',
       ticket_type: mapped.ticket_type || '',
@@ -54,8 +63,27 @@ function saleRowsFromRecords(records) {
       promo_code: mapped.promo_code || '',
       sale_date: mapped.sale_date || '',
       external_transaction_id: mapped.external_transaction_id || '',
+      discount_text: mapped.discount_text || '',
     }
   })
+}
+
+// The same normalization the backend keys mappings by.
+const normLabel = (s) => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+
+// Light client-side mirror of the server's day-token strip — only for
+// PREFILL guesses in the mapping panel (the server re-derives the real
+// thing at import): one leading/trailing weekday word or MM/DD token.
+const WEEKDAY_RX = /(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thur?s?|fri|sat|sun)/i
+const stripDayToken = (label) => {
+  const t = String(label || '')
+  const date = t.match(/\(?\b\d{1,2}\s*\/\s*\d{1,2}\b\)?/)
+  if (date) return (t.slice(0, date.index) + ' ' + t.slice(date.index + date[0].length)).trim().replace(/^[-\u2013\u2014:\u00b7,\s]+|[-\u2013\u2014:\u00b7,\s]+$/g, '')
+  const lead = t.match(new RegExp('^\\s*' + WEEKDAY_RX.source + '\\b[\\s\\-\\u2013\\u2014:\\u00b7,]*', 'i'))
+  if (lead) return t.slice(lead[0].length).trim()
+  const trail = t.match(new RegExp('[\\s\\-\\u2013\\u2014:\\u00b7,]*\\b' + WEEKDAY_RX.source + '\\s*$', 'i'))
+  if (trail) return t.slice(0, trail.index).trim()
+  return t
 }
 
 export default function SeatingSummaryTab({ onToast, eventId }) {
@@ -74,12 +102,14 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
       api.getSeatingSummary(id),
       api.getSectionSummary(id),
       api.listSales(id).catch(() => []),
+      api.getSaleTypeMappings(id).catch(() => []),
     ])
-      .then(([s, sum, secs, saleRows]) => {
+      .then(([s, sum, secs, saleRows, mappings]) => {
         setSettings(s)
         setSummary(sum)
         setPools(secs)
         setHasCsvSales((saleRows || []).some((x) => x.source === 'csv_upload'))
+        setSavedMappings(mappings || [])
         setLoadedEventId(id)
       })
       .catch((err) => onToast(err.message, true))
@@ -137,6 +167,11 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
   const fileInputRef = useRef(null)
   const [stagedSaleRows, setStagedSaleRows] = useState(null)
   const [importingSales, setImportingSales] = useState(false)
+  // 0049: label -> area mapping draft, keyed by NORMALIZED label:
+  // { pool: category_id | '' (auto) | '__not_admission__', face: '$ string' }
+  const [mappingDraft, setMappingDraft] = useState({})
+  const [savedMappings, setSavedMappings] = useState([])
+  const [fileDay, setFileDay] = useState('')
 
   const downloadSalesTemplate = () => {
     const csv = Papa.unparse({
@@ -170,8 +205,32 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
         onToast('No rows found in that file', true)
         return
       }
-      setStagedSaleRows(saleRowsFromRecords(records))
-      onToast(`Loaded ${records.length} row(s) — review before importing`)
+      const rows = saleRowsFromRecords(records)
+      setStagedSaleRows(rows)
+      // Prefill the label->area draft: saved mapping first, else a pool
+      // whose name matches the (day-stripped) label. '' = auto/unmapped.
+      const saved = {}
+      for (const m of savedMappings) saved[m.raw_label] = m
+      const poolByNorm = {}
+      for (const p of pools || []) poolByNorm[normLabel(p.category_name)] = p.category_id
+      const draft = {}
+      for (const r of rows) {
+        const key = normLabel(r.ticket_type)
+        if (!key || draft[key]) continue
+        const baseKey = normLabel(stripDayToken(r.ticket_type))
+        const m = saved[key] || saved[baseKey]
+        if (m) {
+          draft[key] = {
+            pool: m.is_admission === false ? '__not_admission__' : m.seating_category_id || '',
+            face: m.face_value_cents != null ? String(m.face_value_cents / 100) : '',
+          }
+        } else {
+          draft[key] = { pool: poolByNorm[key] || poolByNorm[baseKey] || '', face: '' }
+        }
+      }
+      setMappingDraft(draft)
+      setFileDay('')
+      onToast(`Loaded ${records.length} row(s) — review the area mapping, then import`)
     } catch (err) {
       onToast(`Couldn't read that file: ${err.message}`, true)
     }
@@ -186,6 +245,17 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
   const runSalesImport = async () => {
     setImportingSales(true)
     try {
+      // Save the label->area answers first — the import right after is
+      // what applies them (and every future upload applies them free).
+      const mappings = Object.entries(mappingDraft)
+        .filter(([, d]) => d.pool || d.face)
+        .map(([label, d]) => ({
+          raw_label: label,
+          seating_category_id: d.pool && d.pool !== '__not_admission__' ? d.pool : null,
+          face_value_cents: d.face ? Math.round(Number(d.face) * 100) : null,
+          is_admission: d.pool !== '__not_admission__',
+        }))
+      if (mappings.length) await api.putSaleTypeMappings(loadedEventId, mappings)
       const rows = stagedSaleRows.map((r) => ({
         buyer_name: r.buyer_name || null,
         buyer_email: r.buyer_email || null,
@@ -195,6 +265,8 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
         promo_code: r.promo_code || null,
         sale_date: r.sale_date || null,
         external_transaction_id: r.external_transaction_id || null,
+        event_day: fileDay || null,
+        discount_text: r.discount_text || null,
       }))
       const result = await api.importSales(loadedEventId, rows)
       onToast(
@@ -318,10 +390,12 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
       <div className="panel" style={{ marginTop: 20 }}>
         <div className="panel-title">Import box office sales</div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
-          Columns: Buyer Name, Buyer Email, Amount, Ticket Type, Quantity (defaults to 1), Promo Code
-          (optional), Sale Date, External Transaction ID (recommended — prevents double-counting if you
-          re-upload the same export later). Ticket Type is matched to the area by name, so imports land in the
-          Sold column above.
+          Upload your ticket platform&apos;s export as-is — common column names are recognized
+          automatically, including box-office style Last Name / First Name, Barcode (prevents
+          double-counting when you re-upload the same growing export), and Discounts cells like
+          &ldquo;Coupon CODE: -$6.50&rdquo; (credited to that referral code). You&apos;ll map each
+          ticket-type to an area once in staging; after that, uploads land themselves in the Sold
+          column above.
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <input
@@ -356,6 +430,92 @@ export default function SeatingSummaryTab({ onToast, eventId }) {
               </button>
             </div>
           </div>
+          {/* ---------- 0049: label -> area mapping (map once, applies to every future upload) ---------- */}
+          {(() => {
+            const counts = {}
+            const labels = []
+            for (const r of stagedSaleRows) {
+              const key = normLabel(r.ticket_type)
+              if (!key) continue
+              if (!(key in counts)) labels.push(key)
+              counts[key] = (counts[key] || 0) + (Number(r.quantity) || 1)
+            }
+            if (!labels.length) return null
+            const bare = (pools || []).filter((p) => !/\(\d{2}\/\d{2}\)$/.test(p.category_name))
+            const dated = (pools || []).filter((p) => /\(\d{2}\/\d{2}\)$/.test(p.category_name))
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>Where do these land?</div>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
+                  One answer per ticket-type in the file — saved, so next month&apos;s upload maps itself.
+                  Pick the <strong>base</strong> area; a day in the ticket name (or the selector below)
+                  routes to that night&apos;s copy automatically. Face value fills missing amounts (minus
+                  any coupon) so percentage rewards can compute.
+                </p>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Ticket type in file</th>
+                      <th>Tickets</th>
+                      <th>Area</th>
+                      <th className="col-flex">Face value ($, optional)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {labels.map((key) => {
+                      const d = mappingDraft[key] || { pool: '', face: '' }
+                      const setD = (changes) => setMappingDraft({ ...mappingDraft, [key]: { ...d, ...changes } })
+                      return (
+                        <tr key={key}>
+                          <td>{key}</td>
+                          <td className="mono">{counts[key]}</td>
+                          <td>
+                            <select value={d.pool} onChange={(e) => setD({ pool: e.target.value })}>
+                              <option value="">Auto (match by name)</option>
+                              {bare.map((p) => (
+                                <option key={p.category_id} value={p.category_id}>{p.category_name}</option>
+                              ))}
+                              {dated.length > 0 && (
+                                <optgroup label="Single-night copies">
+                                  {dated.map((p) => (
+                                    <option key={p.category_id} value={p.category_id}>{p.category_name}</option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <option value="__not_admission__">Not admission (drink coupon, merch…)</option>
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              style={{ width: 90 }}
+                              placeholder="105.00"
+                              value={d.face}
+                              disabled={d.pool === '__not_admission__'}
+                              onChange={(e) => setD({ face: e.target.value })}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {eventDays.length > 1 && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, fontSize: 12.5 }}>
+                    <label htmlFor="file-day" style={{ fontWeight: 600 }}>Which day is this file for?</label>
+                    <select id="file-day" value={fileDay} onChange={(e) => setFileDay(e.target.value)}>
+                      <option value="">Mixed / day is in the ticket names</option>
+                      {eventDays.map((day) => (
+                        <option key={day} value={day}>{fmtChip(day)}</option>
+                      ))}
+                    </select>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      A day inside a ticket name always wins over this.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           <div className="table-scroll">
             <table className="data-table">
               <thead>
