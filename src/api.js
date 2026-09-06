@@ -123,11 +123,6 @@ export const api = {
   listSeatingCategories: (eventId) => request(`/events/${eventId}/seating-categories`),
   createSeatingCategory: (eventId, payload) =>
     request(`/events/${eventId}/seating-categories`, { method: 'POST', body: JSON.stringify(payload) }),
-  updateSeatingCategory: (eventId, categoryId, payload) =>
-    request(`/events/${eventId}/seating-categories/${categoryId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    }),
   deleteSeatingCategory: (eventId, categoryId) =>
     request(`/events/${eventId}/seating-categories/${categoryId}`, { method: 'DELETE' }),
   syncGuestTickets: (eventId, guestId, payload) =>

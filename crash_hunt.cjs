@@ -26,6 +26,7 @@ const GT = {
 }
 const GUEST = {
   id: 'g-1',
+  is_referrer_only: false,
   name: 'Ava Chen',
   email: 'ava@example.com',
   guest_type_id: 'gt-1',
@@ -74,17 +75,37 @@ const ORDER = {
 }
 const CODE = {
   id: 'pc-1',
+  event_id: 'ev-1',
+  guest_id: 'g-1',
   code: 'AVA10',
-  referrer_guest_id: 'g-1',
-  reward_type: 'points',
-  points_per_ticket: 10,
-  points_per_dollar: null,
-  flat_per_ticket_cents: null,
-  percent_of_sale: null,
-  buyer_discount_percent: null,
-  buyer_discount_cents: null,
+  reward_type: 'flat_amount',
+  reward_value: 2,
+  points_rates: [],
+  referral_message_draft: null,
+  discount_type: 'percentage',
+  discount_value: 10,
   link_clicks: 3,
-  is_active: true,
+  created_at: '2026-08-20T12:00:00Z',
+  sale_count: 1,
+  total_reward: 2,
+  points_available: null,
+  bonus_awards: [],
+  bonus_tiers_overridden: false,
+}
+// A SELF promo (0042): no referrer, no reward — the Promos and Promo
+// tracking pages filter to exactly these.
+const SELF_PROMO = {
+  ...CODE,
+  id: 'pc-2',
+  guest_id: null,
+  code: 'EARLYBIRD',
+  reward_type: null,
+  reward_value: null,
+  discount_type: 'percentage',
+  discount_value: 20,
+  link_clicks: 7,
+  sale_count: 2,
+  total_reward: null,
 }
 const PROFILE = {
   id: 'p-1',
@@ -108,6 +129,10 @@ const PROFILE = {
 // URL-suffix -> JSON. Order matters: first match wins.
 const ROUTES = [
   ['/me', { id: 'u-1', name: 'Joshua', role: 'owner' }],
+  ['/seating-categories/section-summary', [
+    { category_id: 'cat-1', category_name: 'VIP Front', sales_grain: 'ga', capacity: 40,
+      sections: [{ section_label: null, capacity: 40, bought: 5, given: 8, left: 27 }] },
+  ]],
   ['/seating-categories/summary', [
     { category_id: 'cat-1', category_name: 'VIP Front', capacity: 40, box_office: 5, allotted: 10, committed: 8, confirmed_avail: 27, estimated_avail: 25 },
   ]],
@@ -115,19 +140,41 @@ const ROUTES = [
   ['/guest-types/gt-1/seating-priorities', [{ id: 'sp-1', seating_category_id: 'cat-1', priority: 1 }]],
   ['/guest-types/gt-1/ticket-allotments', [{ date: '2026-09-12', quantity: 2 }]],
   ['/guest-types', [GT]],
-  ['/guests', [GUEST, { ...GUEST, id: 'g-2', name: 'Bex Sponsor', email: 'bex@example.com', rsvp_token: 'tok-2', allotment_total: 2, allotment_distributed: 1 }]],
+  ['/guests/roster/door', [
+    { id: 'g-1', name: 'Ava Chen', email: 'ava@example.com', guest_type_id: 'gt-1',
+      allocation_status: 'confirmed', rsvp_confirmed: 'yes', party_size: 1, visit_date: '2026-09-12',
+      allocated_by_guest_id: null, checked_in_at: null, tickets_sent_at: null,
+      tickets: [{ code: 'TKT-AVA-1', valid_date: '2026-09-12', status: 'issued', checked_in_at: null, seat_label: null }] },
+  ]],
+  ['/guests', [{ ...GUEST, id: 'g-3', name: 'Ivy Influencer', email: 'ivy@example.com', rsvp_token: 'tok-3', guest_type_id: null, is_referrer_only: true },
+    GUEST, { ...GUEST, id: 'g-2', name: 'Bex Sponsor', email: 'bex@example.com', rsvp_token: 'tok-2', guest_mode: 'distribute', effective_mode: 'distribute', allotment_total: 2, allotment_distributed: 1 }]],
   ['/profile/links', [{ id: 'l-1', kind: 'social', label: 'Instagram', value: 'https://instagram.com/x' }]],
   ['/profile/schedule', []],
   ['/profile/photos', []],
   ['/profile', PROFILE],
-  ['/sales-config', { platform: 'eventbrite' }],
+  ['/settings', { event_id: 'ev-1', ticketing_mode: 'native', sales_source: 'native', comp_delivery: 'rsvp_required',
+    ticket_span: 'single_day', pricing_mode: 'uniform', seating_mode: 'uniform',
+    first_day: '2026-09-12', last_day: '2026-09-12', updated_at: null }],
+  ['/sales-config', { platform: 'eventbrite', available_platforms: [
+    { value: 'eventbrite', label: 'Eventbrite', has_live_api: false },
+    { value: 'custom_csv', label: 'Custom CSV', has_live_api: false },
+  ] }],
   ['/promo-codes/pc-1/redemption-options', []],
   ['/promo-codes/pc-1/bonus-tiers', { tiers: [], inherited: true }],
-  ['/promo-codes', [CODE]],
-  ['/redemption-tiers', []],
+  ['/promo-stats', [
+    { id: 'pc-2', code: 'EARLYBIRD', guest_id: null, referrer_name: null, discount_type: 'percentage',
+      discount_value: 20, link_clicks: 7, sale_count: 2, tickets_sold: 5, amount_sold: 220, rows_missing_amount: 0 },
+    { id: 'pc-1', code: 'AVA10', guest_id: 'g-1', referrer_name: 'Ava Chen', discount_type: 'percentage',
+      discount_value: 10, link_clicks: 3, sale_count: 1, tickets_sold: 1, amount_sold: 55, rows_missing_amount: 0, last_sale_at: '2026-08-21T09:30:00Z' },
+  ]],
+  ['/promo-codes', [CODE, SELF_PROMO]],
+  ['/redemption-tiers', [{ id: 'rt-1', points_required: 100, label: 'Bronze' }]],
   ['/bonus-tiers', []],
-  ['/sales', [{ id: 's-1', promo_code_id: 'pc-1', buyer_name: 'Sam', amount_cents: 5500, quantity: 1, created_at: '2026-08-20T12:00:00Z', source: 'native' }]],
-  ['/reward-redemptions', []],
+  ['/sales', [{ id: 's-1', event_id: 'ev-1', promo_code_id: 'pc-1', buyer_name: 'Sam Lee', buyer_email: 'sam@example.com', amount: 55, ticket_type: 'General Admission', quantity: 1, sale_date: '2026-08-20', external_transaction_id: null, source: 'native', computed_reward: 2, imported_at: '2026-08-20T12:00:00Z' },
+    { id: 's-2', event_id: 'ev-1', promo_code_id: null, buyer_name: 'Organic Olive', buyer_email: 'olive@example.com', amount: 55, ticket_type: 'General Admission', quantity: 1, sale_date: '2026-08-22', external_transaction_id: null, source: 'native', computed_reward: null, imported_at: '2026-08-22T12:00:00Z' }]],
+  ['/reward-redemptions', [{ id: 'rr-1', promo_code_id: 'pc-1', redemption_tier_id: 'rt-1', choice: 'cash',
+    points_spent: 100, cash_value: 25, ticket_value: null, created_guest_id: null, payout_status: 'pending',
+    redeemed_at: '2026-08-21T12:00:00Z', promo_code: 'AVA10', referrer_name: 'Ava Chen' }]],
   ['/ticket-types', [TT]],
   ['/orders', [ORDER]],
   ['/events', [EV1, EV2]],
@@ -231,17 +278,36 @@ async function main() {
   expectText('shell', 'Promote')
   expectText('shell', 'Manage')
 
-  // 4. Click through every tab.
+  // 4. Click through every tab. Groups are collapsed by default, so pop
+  // every group toggle open first — a nav-item inside a closed group
+  // isn't in the DOM at all.
+  const openAllGroups = () => {
+    for (const t of dom.window.document.querySelectorAll('button.nav-group-toggle')) {
+      if (!t.className.includes('open')) t.click()
+    }
+  }
+  openAllGroups()
+  await sleep(100)
+
   const TAB_CHECKS = [
+    ['Event settings', 'Ticketing mode'],
+    ['Seats Setup', 'General Admission'],
     ['Event page', 'Public event page'],
-    ['Ticket types', 'General Admission'],
-    ['Seating & capacity', 'VIP Front'],
-    ['Promos & referrals', 'AVA10'],
+    ['Promos', 'EARLYBIRD'],
+    ['Promo tracking', 'No promo code'],
+    ['Promo tracking', 'Switch your sales data source'],
+    ['Referral setup', 'Ivy Influencer'],
+    ['Referral payouts', 'AVA10'],
     ['Orders', 'Sam Lee'],
-    ['Guest list', 'Ava Chen'],
-    ['RSVPs', 'Bex Sponsor'],
+    ['Invites', 'Ava Chen'],
+    ['Allotments', 'Bex Sponsor'],
+    ['Guest list', '1 ticket'],
+    ['Seating summary', 'VIP Front'],
+    ['Seating summary', 'Switch your sales data source'],
   ]
   for (const [label, needle] of TAB_CHECKS) {
+    openAllGroups()
+    await sleep(50)
     const btn = [...dom.window.document.querySelectorAll('button.nav-item')].find(
       (b) => b.textContent.trim() === label
     )
