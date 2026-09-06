@@ -114,6 +114,14 @@ export default function EventSettingsTab({ onToast, eventId, event }) {
   const [uploadingMap, setUploadingMap] = useState(false)
   const [dayDraft, setDayDraft] = useState(null) // {ticket_span, pricing_mode, seating_mode, first_day, last_day}
   const [savingDays, setSavingDays] = useState(false)
+  // Stripe Connect payout account — org-scoped (one account for every
+  // event this org runs), status mirrored from Stripe. null = loading;
+  // a load failure leaves the card in a retryable error state without
+  // blocking the rest of the tab.
+  const [payments, setPayments] = useState(null)
+  const [paymentsError, setPaymentsError] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [openingManage, setOpeningManage] = useState(false)
 
   useEffect(() => {
     api
@@ -137,8 +145,51 @@ export default function EventSettingsTab({ onToast, eventId, event }) {
         setProfileLoaded(true)
       })
       .catch((e) => onToast(e.message, true))
+    loadPayments()
+    // Back from Stripe onboarding: the param already routed the dashboard
+    // to this tab — acknowledge, then strip it so a refresh doesn't loop.
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.has('payments')) {
+        onToast('Welcome back — payout status updated below')
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    } catch {
+      // URL APIs blocked (jsdom edge) — the card still loads normally
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const loadPayments = () => {
+    setPaymentsError(false)
+    api
+      .getPaymentsStatus(eventId)
+      .then(setPayments)
+      .catch(() => setPaymentsError(true))
+  }
+
+  const handleConnectPayments = async () => {
+    setConnecting(true)
+    try {
+      const { url } = await api.connectPayments(eventId)
+      window.location.href = url // Stripe-hosted onboarding; returns to /?payments=return
+    } catch (err) {
+      onToast(err.message, true)
+      setConnecting(false)
+    }
+  }
+
+  const handleManagePayments = async () => {
+    setOpeningManage(true)
+    try {
+      const { url } = await api.managePaymentsLink(eventId)
+      window.open(url, '_blank', 'noopener') // one-time Express dashboard login
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setOpeningManage(false)
+    }
+  }
 
   const changeSetting = async (field, value) => {
     setSavingField(field)
@@ -231,6 +282,57 @@ export default function EventSettingsTab({ onToast, eventId, event }) {
         onChange={(v) => changeSetting('ticketing_mode', v)}
         saving={savingField === 'ticketing_mode'}
       />
+
+      <div className="panel">
+        <div className="panel-title">Payouts</div>
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+          Where ticket money goes when you sell natively. One Stripe account covers your whole
+          organization &mdash; connecting here applies to every event you run. Bank and identity details
+          are entered on Stripe&apos;s own secure pages; EventNXT never sees or stores them.
+        </p>
+        {paymentsError ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Couldn&apos;t load payout status.</span>
+            <button className="btn btn-secondary btn-sm" onClick={loadPayments}>Retry</button>
+          </div>
+        ) : !payments ? (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking payout status&hellip;</span>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span className={`pill ${payments.charges_enabled ? 'pill-confirmed' : payments.connected ? 'pill-pending' : 'pill-notsent'}`}>
+                {payments.charges_enabled
+                  ? 'Ready — payouts active'
+                  : payments.details_submitted
+                    ? 'Verification pending'
+                    : payments.connected
+                      ? 'Setup started, not finished'
+                      : 'Not connected'}
+              </span>
+              {!payments.charges_enabled && (
+                <button className="btn btn-primary btn-sm" onClick={handleConnectPayments} disabled={connecting}>
+                  {connecting
+                    ? 'Opening Stripe…'
+                    : payments.connected
+                      ? 'Finish setting up payouts'
+                      : 'Connect payouts'}
+                </button>
+              )}
+              {payments.details_submitted && (
+                <button className="btn btn-secondary btn-sm" onClick={handleManagePayments} disabled={openingManage}>
+                  {openingManage ? 'Opening…' : 'Manage payouts'}
+                </button>
+              )}
+            </div>
+            {settings.ticketing_mode === 'native' && !payments.charges_enabled && (
+              <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', marginTop: 10, marginBottom: 0 }}>
+                This event sells natively &mdash; once live payments launch, ticket sales will require a
+                connected payout account. Connecting now takes about five minutes.
+              </p>
+            )}
+          </>
+        )}
+      </div>
 
       <ChoiceGroup
         title="Sales data"

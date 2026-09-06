@@ -95,7 +95,18 @@ const loadOpenGroups = () => {
 }
 
 export default function Dashboard() {
-  const [tab, setTab] = useState('overview')
+  // Stripe Connect onboarding round-trips through connect.stripe.com and
+  // lands back on "/?payments=return" (or =refresh when a link expired
+  // mid-session) — open straight onto Event settings so the organizer
+  // returns to the Payouts card they left from. The remembered event in
+  // sessionStorage survives the same-tab round trip and restores below.
+  const [tab, setTab] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).has('payments') ? 'settings' : 'overview'
+    } catch {
+      return 'overview'
+    }
+  })
   const [toast, setToast] = useState(null)
   const [me, setMe] = useState(null)
   const [events, setEvents] = useState(null) // null = loading, [] = none yet

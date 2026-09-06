@@ -247,6 +247,13 @@ export const api = {
   getSeatingSummary: (eventId) => request(`/events/${eventId}/seating-categories/summary`),
   getSectionSummary: (eventId) => request(`/events/${eventId}/seating-categories/section-summary`),
 
+  // Payments — the org's Stripe Connect payout account. Status is three
+  // booleans mirrored from Stripe; connect/manage return one-time Stripe
+  // URLs the browser is sent to (EventNXT hosts no payment forms).
+  getPaymentsStatus: (eventId) => request(`/events/${eventId}/payments`),
+  connectPayments: (eventId) => request(`/events/${eventId}/payments/connect`, { method: 'POST' }),
+  managePaymentsLink: (eventId) => request(`/events/${eventId}/payments/manage-link`, { method: 'POST' }),
+
   // Event settings — the operating profile (ticketing mode / sales source /
   // comp delivery). GET infers for events that never chose.
   getEventSettings: (eventId) => request(`/events/${eventId}/settings`),
