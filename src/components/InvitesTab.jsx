@@ -712,7 +712,6 @@ export default function InvitesTab({ onToast, eventId }) {
   }
 
   const openGuestSeats = (g) => {
-    setExpandedAllotmentGuestId(null) // one expander at a time
     setSeatsGuestId(g.id)
     setGuestSeatMap(null)
     setGuestSeatSel([])
