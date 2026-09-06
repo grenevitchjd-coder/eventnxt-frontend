@@ -7,11 +7,14 @@
 // page: a pure influencer must never be asked "will you attend?" for an
 // event they weren't invited to (copy is part of the data model).
 //
-// Reads the same /public/rsvp/<token> payload the RSVP page uses —
-// referral_codes already rides in it — so no new backend surface was
-// needed. The Promote-redesign's slice D grows this page into the
-// two-tab portal (progress dashboard + refer-people outreach); this v1
-// is the reward-claiming half so the emailed link is real from day one.
+// Reads the same /public/rsvp/<token> payload the RSVP page uses.
+// Slice D: each code now carries its progress — tickets sold, $ sold,
+// link clicks, accrued reward — aggregated by the SAME backend function
+// that feeds the organizer's Promo tracking / Referral payouts pages,
+// so referrer and organizer always look at one truth. "Estimated
+// payout" = accrued reward in the deal's own unit; points deals show
+// balance + affordable tiers instead (per the redesign's answer 3).
+// Slice E adds the second tab (refer people by email).
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
@@ -82,10 +85,50 @@ export default function PublicReferrerPage() {
           <div key={c.promo_code_id} className="panel" style={{ textAlign: 'left', marginTop: 20 }}>
             <div className="panel-title">
               Code <span className="mono">{c.code}</span>
+              {c.discount_type && (
+                <span style={{ fontWeight: 400, fontSize: 13, color: 'var(--text-muted)' }}>
+                  {' '}— your people get {c.discount_type === 'percentage'
+                    ? `${Number(c.discount_value)}% off`
+                    : `$${Number(c.discount_value)} off`}
+                </span>
+              )}
             </div>
-            {c.reward_type === 'points' && (
-              <p style={{ margin: '0 0 10px' }}>
-                {c.points_available ?? 0} point{c.points_available === 1 ? '' : 's'} available
+
+            {/* ---- Progress (slice D): same numbers the organizer sees ---- */}
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', margin: '4px 0 14px' }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} className="mono">{c.tickets_sold ?? 0}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>tickets sold</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} className="mono">
+                  ${Number(c.amount_sold ?? 0).toFixed(2)}{(c.rows_missing_amount ?? 0) > 0 ? '*' : ''}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>in sales</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} className="mono">{c.link_clicks ?? 0}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>link clicks</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} className="mono">
+                  {c.reward_type === 'points'
+                    ? `${c.points_available ?? 0} pts`
+                    : c.total_reward == null
+                      ? '—'
+                      : c.reward_type === 'free_tickets'
+                        ? `${Number(c.total_reward)} tickets`
+                        : `$${Number(c.total_reward).toFixed(2)}`}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {c.reward_type === 'points' ? 'points available' : 'estimated payout'}
+                </div>
+              </div>
+            </div>
+            {(c.rows_missing_amount ?? 0) > 0 && (
+              <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-8px 0 12px' }}>
+                * some box-office sales arrived without a dollar amount — their tickets count, the $ total
+                only sums rows that carried one.
               </p>
             )}
 
