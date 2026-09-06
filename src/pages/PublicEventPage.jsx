@@ -83,7 +83,19 @@ export default function PublicEventPage() {
   // null = nothing checked; {valid, discount_type, discount_value} once checked
   const [promoInfo, setPromoInfo] = useState(null)
   // Find-my-tickets mini-form: closed | open | sending | sent
-  const [dayFilter, setDayFilter] = useState('all') // 'all' | iso date | 'passes'
+  const [dayFilter, setDayFilter] = useState(null) // 'passes' (labeled All days) | iso date | null until types load
+  // Default chip once types arrive: "All days" when pass products exist,
+  // else the first night. Lives up here with the other hooks — an effect
+  // below the loading early-returns changes hook order between renders
+  // (Rules of Hooks; the throwaway probe caught exactly that).
+  useEffect(() => {
+    if (!Array.isArray(ticketTypes) || dayFilter !== null) return
+    const dated = ticketTypes.some((t) => t.valid_date)
+    if (!dated) return
+    const undated = ticketTypes.some((t) => !t.valid_date)
+    const days = [...new Set(ticketTypes.map((t) => t.valid_date).filter(Boolean))].sort()
+    setDayFilter(undated ? 'passes' : days[0])
+  }, [ticketTypes, dayFilter])
   const [findState, setFindState] = useState('closed')
   const [findEmail, setFindEmail] = useState('')
 
@@ -227,23 +239,16 @@ export default function PublicEventPage() {
 
   const dayLabel = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
 
-  const headingFor = (t, i) => {
-
-    if (!anyDated) return null
-
-    const prev = i > 0 ? visibleTypes[i - 1].valid_date || '' : undefined
-
-    const cur = t.valid_date || ''
-
-    if (prev === cur) return null
-
-    return cur ? dayLabel(cur) : 'All days'
-
-  }
-  // Display-only day filter (2026-09-05): selections made on other days
-  // stay in the order — the total under the buyer form spans everything.
+  // Chips replaced in-list day headings (the active chip IS the label);
+  // headingFor now always yields null and dayLabel is kept for chips.
+  const headingFor = () => null
+  // Display-only day filter (2026-09-05, redirected same day): the
+  // chips ARE the sections — "All days" shows the all-days/pass
+  // products, each night chip shows that night, and there is no
+  // show-everything view. Selections made under other chips stay in
+  // the order — the total under the buyer form spans everything.
   const visibleTypes =
-    dayFilter === 'all'
+    dayFilter === null
       ? orderedTypes
       : dayFilter === 'passes'
         ? orderedTypes.filter((t) => !t.valid_date)
@@ -501,22 +506,18 @@ export default function PublicEventPage() {
             </h2>
             {anyDated && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
-                <button className={`btn btn-small ${dayFilter === 'all' ? 'btn-secondary' : 'btn-ghost'}`}
-                        onClick={() => setDayFilter('all')}>
-                  All days
-                </button>
+                {anyUndated && (
+                  <button className={`btn btn-small ${dayFilter === 'passes' ? 'btn-secondary' : 'btn-ghost'}`}
+                          onClick={() => setDayFilter('passes')}>
+                    All days
+                  </button>
+                )}
                 {eventDays.map((d) => (
                   <button key={d} className={`btn btn-small ${dayFilter === d ? 'btn-secondary' : 'btn-ghost'}`}
                           onClick={() => setDayFilter(d)}>
                     {new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })}
                   </button>
                 ))}
-                {anyUndated && (
-                  <button className={`btn btn-small ${dayFilter === 'passes' ? 'btn-secondary' : 'btn-ghost'}`}
-                          onClick={() => setDayFilter('passes')}>
-                    Passes
-                  </button>
-                )}
               </div>
             )}
             {hiddenSelectedCount > 0 && (
