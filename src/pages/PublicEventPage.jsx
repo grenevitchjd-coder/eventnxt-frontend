@@ -78,6 +78,11 @@ export default function PublicEventPage() {
   // may sit somewhere new each show. {ttId: {isoDate: zoneSectionId}}
   const [passNightChoice, setPassNightChoice] = useState({})
   const [buyer, setBuyer] = useState({ name: '', email: '', promo: '' })
+  // Purchasing agreement (0048): required agree-box + optional §7
+  // marketing consent. Declared here with their hook siblings — never
+  // below the loading early-returns (Rules of Hooks house rule).
+  const [agreeTerms, setAgreeTerms] = useState(false)
+  const [marketingOptIn, setMarketingOptIn] = useState(false)
   const [checkingOut, setCheckingOut] = useState(false)
   const [checkoutError, setCheckoutError] = useState(null)
   // null = nothing checked; {valid, discount_type, discount_value} once checked
@@ -394,6 +399,8 @@ export default function PublicEventPage() {
                     : { ticket_type_id: t.id, quantity: quantities[t.id] }
             ),
           promo_code: buyer.promo.trim() || null,
+          terms_accepted: agreeTerms,
+          marketing_opt_in: marketingOptIn,
         }),
       })
       const data = await res.json()
@@ -791,8 +798,35 @@ export default function PublicEventPage() {
                         : 'Referral code applied.'}
                   </p>
                 )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '12px 0 4px' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      required
+                      checked={agreeTerms}
+                      onChange={(e) => setAgreeTerms(e.target.checked)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      I have read and agree to the{' '}
+                      <a href="/terms/purchase" target="_blank" rel="noopener noreferrer">
+                        Ticket Purchasing Agreement &amp; Terms of Sale
+                      </a>
+                      .
+                    </span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={marketingOptIn}
+                      onChange={(e) => setMarketingOptIn(e.target.checked)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>The event organizer may email me about future events. <em>(optional)</em></span>
+                  </label>
+                </div>
                 {checkoutError && <p className="ticket-checkout-error">{checkoutError}</p>}
-                <button className="btn btn-primary public-event-cta checkout-submit" type="submit" disabled={checkingOut}>
+                <button className="btn btn-primary public-event-cta checkout-submit" type="submit" disabled={checkingOut || !agreeTerms}>
                   {checkingOut
                     ? 'One moment…'
                     : dueCents === 0

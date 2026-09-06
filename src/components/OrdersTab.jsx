@@ -227,7 +227,14 @@ export default function OrdersTab({ onToast, eventId }) {
                 <tr key={o.id}>
                   <td>
                     <div>{o.buyer_name}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{o.buyer_email}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      {o.buyer_email}
+                      {o.marketing_opt_in && (
+                        <span title="Opted in to organizer marketing emails at checkout" style={{ marginLeft: 6, color: 'var(--accent, #4f6df5)' }}>
+                          ✓ marketing OK
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     {o.items.map((i, idx) => (
