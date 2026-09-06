@@ -319,6 +319,7 @@ export const api = {
 
   // Sales
   listSales: (eventId) => request(`/events/${eventId}/sales`),
+  getPromoStats: (eventId) => request(`/events/${eventId}/promo-stats`),
   importSales: (eventId, rows) =>
     request(`/events/${eventId}/sales/import`, { method: 'POST', body: JSON.stringify({ rows }) }),
 
