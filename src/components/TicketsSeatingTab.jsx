@@ -57,8 +57,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [settings, setSettings] = useState(null)
   const [ticketTypes, setTicketTypes] = useState(null)
   const [categories, setCategories] = useState(null)
-  const [seatingSummary, setSeatingSummary] = useState(null)
-  const [loadingSummary, setLoadingSummary] = useState(false)
 
   const [composer, setComposer] = useState(EMPTY_COMPOSER)
   const [creating, setCreating] = useState(false)
@@ -104,15 +102,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const [compForm, setCompForm] = useState({ name: '', capacity: '' })
   const [creatingComp, setCreatingComp] = useState(false)
 
-  const loadSeatingSummary = () => {
-    setLoadingSummary(true)
-    api
-      .getSeatingSummary(eventId)
-      .then(setSeatingSummary)
-      .catch((e) => onToast(e.message, true))
-      .finally(() => setLoadingSummary(false))
-  }
-
   const loadEventData = () => {
     Promise.all([api.listTicketTypes(eventId), api.listSeatingCategories(eventId)])
       .then(([tts, cats]) => {
@@ -120,7 +109,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         setCategories(cats)
       })
       .catch((e) => onToast(e.message, true))
-    loadSeatingSummary()
   }
 
   // Event context (eventId) comes from the Dashboard shell, which also
@@ -363,7 +351,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       setTicketTypes(ticketTypes.map((x) => (x.id === t.id ? updated : x)))
       setEditingId(null)
       onToast('Saved')
-      loadSeatingSummary()
     } catch (err) {
       onToast(err.message, true)
     } finally {
@@ -398,7 +385,6 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     try {
       await api.deleteTicketType(eventId, t.id)
       setTicketTypes(ticketTypes.filter((x) => x.id !== t.id))
-      loadSeatingSummary()
     } catch (err) {
       onToast(err.message, true)
     }
@@ -673,6 +659,15 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   // ---------- Comp-only areas ----------
 
   const soldPoolIds = new Set((ticketTypes || []).map((t) => t.seating_category_id).filter(Boolean))
+
+  // Day chips: types carry real valid_dates, so filtering is exact —
+  // 'undated' = passes and all-days types. Display-only; nothing about
+  // the data changes.
+  const [dayFilter, setDayFilter] = useState('all')
+  const typeMatchesDay = (t) =>
+    dayFilter === 'all' ? true : dayFilter === 'undated' ? !t.valid_date : t.valid_date === dayFilter
+  const visibleTicketTypes = (ticketTypes || []).filter(typeMatchesDay)
+  const fmtChipDay = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })
   const compPools = (categories || []).filter((c) => !soldPoolIds.has(c.id))
 
   const handleCreateComp = async (e) => {
@@ -731,7 +726,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
 
   return (
     <>
-      <div className="page-title">Tickets &amp; seating</div>
+      <div className="page-title">Seats Setup</div>
       <p className="page-subtitle">
         {selling
           ? 'Ticket types are your prices. Pick the basis — a named area, rows, or tables — and the form asks for exactly the structure that basis needs.'
@@ -1046,6 +1041,30 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       )}
 
       {selling && (
+        <>
+        {eventDays.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
+            <button className={`btn btn-sm ${dayFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDayFilter('all')}>
+              All
+            </button>
+            {eventDays.map((d) => (
+              <button
+                key={d}
+                className={`btn btn-sm ${dayFilter === d ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setDayFilter(d)}
+              >
+                {fmtChipDay(d)}
+              </button>
+            ))}
+            <button
+              className={`btn btn-sm ${dayFilter === 'undated' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setDayFilter('undated')}
+              title="Passes and types not tied to one night"
+            >
+              All-days
+            </button>
+          </div>
+        )}
         <table className="data-table" style={{ marginBottom: 28 }}>
           <thead>
             <tr>
@@ -1061,15 +1080,16 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             </tr>
           </thead>
           <tbody>
-            {ticketTypes.length === 0 ? (
+            {visibleTicketTypes.length === 0 ? (
               <tr>
                 <td colSpan={9} className="empty-state">
-                  No ticket types yet — the public page shows the external ticket link (if set) until one
-                  exists here.
+                  {ticketTypes.length === 0
+                    ? 'No ticket types yet — the public page shows the external ticket link (if set) until one exists here.'
+                    : 'No ticket types for this day.'}
                 </td>
               </tr>
             ) : (
-              ticketTypes.map((t) => {
+              visibleTicketTypes.map((t) => {
                 const pool = poolFor(t)
                 const breakdown = sectionSummaryLine(pool)
                 return (
@@ -1475,6 +1495,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
             )}
           </tbody>
         </table>
+        </>
       )}
 
       {/* ---------- Comp-only areas — never sold ---------- */}
@@ -1537,62 +1558,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       </div>
 
       {/* ---------- Seating Summary — reconciliation ---------- */}
-      <div className="panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="panel-title" style={{ margin: 0 }}>
-            Seating summary
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={loadSeatingSummary} disabled={loadingSummary}>
-            {loadingSummary ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 14 }}>
-          A live reconciliation across every source — box office sales are matched by ticket type against
-          each pool&apos;s name. &ldquo;Confirmed avail.&rdquo; mirrors the real capacity check;
-          &ldquo;estimated avail.&rdquo; also subtracts pending guest-list holds and box office sales.
-        </p>
-        {seatingSummary === null ? (
-          <p style={{ fontSize: 13 }}>Loading…</p>
-        ) : seatingSummary.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nothing to reconcile yet.</p>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Area</th>
-                <th>Capacity</th>
-                <th>Box office</th>
-                <th>Allotted</th>
-                <th>Committed</th>
-                <th>Confirmed avail.</th>
-                <th>Estimated avail.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {seatingSummary.map((row) => {
-                const pool = (categories || []).find((c) => c.id === row.category_id)
-                const breakdown = sectionSummaryLine(pool)
-                return (
-                  <tr key={row.category_id}>
-                    <td>
-                      {row.category_name}
-                      {breakdown && (
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{breakdown}</div>
-                      )}
-                    </td>
-                    <td className="mono">{row.capacity}</td>
-                    <td className="mono">{row.box_office}</td>
-                    <td className="mono">{row.allotted}</td>
-                    <td className="mono">{row.committed}</td>
-                    <td className="mono">{row.confirmed_avail}</td>
-                    <td className="mono">{row.estimated_avail}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+
     </>
   )
 }

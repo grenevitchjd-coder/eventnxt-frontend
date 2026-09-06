@@ -53,7 +53,7 @@ const NAV_GROUPS = [
     label: 'Set up',
     tabs: [
       { key: 'settings', label: 'Event settings' },
-      { key: 'tickets', label: 'Tickets & seating' },
+      { key: 'tickets', label: 'Seats Setup' },
       { key: 'workspace', label: 'Guest types' },
       { key: 'home', label: 'Event page' },
     ],
