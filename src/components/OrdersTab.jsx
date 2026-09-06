@@ -25,6 +25,13 @@ export default function OrdersTab({ onToast, eventId }) {
   const [search, setSearch] = useState('')
   const [refundingId, setRefundingId] = useState(null)
   const [eventSlug, setEventSlug] = useState(null) // for View — the buyer's order page URL
+  // Earnings panel (Connect slice 3): this event's money from EventNXT's
+  // own order snapshots, plus the org's live Stripe balance/payouts when
+  // a payout account is connected. Either fetch failing hides its half
+  // without blocking the orders list.
+  const [earnings, setEarnings] = useState(null)
+  const [payouts, setPayouts] = useState(null)
+  const [openingManage, setOpeningManage] = useState(false)
 
   useEffect(() => {
     if (!loadedEventId) return
@@ -38,8 +45,22 @@ export default function OrdersTab({ onToast, eventId }) {
   // that's needed here.
   useEffect(() => {
     loadOrders(eventId, '')
+    api.getEarnings(eventId).then(setEarnings).catch(() => {})
+    api.getPayouts(eventId).then(setPayouts).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const handleManagePayments = async () => {
+    setOpeningManage(true)
+    try {
+      const { url } = await api.managePaymentsLink(eventId)
+      window.open(url, '_blank', 'noopener')
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setOpeningManage(false)
+    }
+  }
 
   const loadOrders = (id, term) => {
     setOrders(null)
@@ -90,6 +111,54 @@ export default function OrdersTab({ onToast, eventId }) {
         the buyer gets everything back, codes void, and the tickets go back on sale.
       </p>
 
+
+      {earnings && (
+        <div className="panel">
+          <div className="panel-title">Earnings</div>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+            Native ticket sales only &mdash; money sold on outside platforms never passes through EventNXT.
+            Refunded orders return the platform fee along with the buyer&apos;s money.
+          </p>
+          <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+            {[
+              ['Gross sold', earnings.gross_sold_cents, `${earnings.paid_orders} paid order${earnings.paid_orders === 1 ? '' : 's'}`],
+              ['Platform fees', earnings.platform_fees_cents, null],
+              ['Organizer net', earnings.organizer_net_cents, null],
+              ['Refunded', earnings.refunded_cents, earnings.refunded_orders ? `${earnings.refunded_orders} order${earnings.refunded_orders === 1 ? '' : 's'}` : null],
+            ].map(([label, cents, sub]) => (
+              <div key={label}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
+                <div style={{ fontSize: 19, fontWeight: 600 }}>{money(cents, earnings.currency)}</div>
+                {sub && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{sub}</div>}
+              </div>
+            ))}
+          </div>
+          {payouts?.connected && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Stripe balance &mdash; pending</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{money(payouts.balance_pending_cents, payouts.currency)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>clearing the 7-day payout delay</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Available for payout</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{money(payouts.balance_available_cents, payouts.currency)}</div>
+                </div>
+                <button className="btn btn-secondary btn-sm" onClick={handleManagePayments} disabled={openingManage} style={{ marginLeft: 'auto' }}>
+                  {openingManage ? 'Opening\u2026' : 'Manage payouts'}
+                </button>
+              </div>
+              <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+                Balance and payouts are for your whole organization, across all its events.
+                {payouts.payouts.length > 0 && (
+                  <> Recent payouts: {payouts.payouts.slice(0, 3).map((p) => `${money(p.amount_cents, p.currency)} (${p.status}, ${p.arrival_date})`).join(' · ')}</>
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {loadedEventId && orders !== null && (
         <table className="data-table">
