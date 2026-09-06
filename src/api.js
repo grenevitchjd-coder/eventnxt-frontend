@@ -250,6 +250,7 @@ export const api = {
 
   // Seating summary reconciliation
   getSeatingSummary: (eventId) => request(`/events/${eventId}/seating-categories/summary`),
+  getSectionSummary: (eventId) => request(`/events/${eventId}/seating-categories/section-summary`),
 
   // Event settings — the operating profile (ticketing mode / sales source /
   // comp delivery). GET infers for events that never chose.

@@ -34,6 +34,7 @@ import GuestListTab from '../components/GuestListTab'
 import InvitesTab from '../components/InvitesTab'
 import AllotmentsTab from '../components/AllotmentsTab'
 import SalesReferralsTab from '../components/SalesReferralsTab'
+import SeatingSummaryTab from '../components/SeatingSummaryTab'
 import OrdersTab from '../components/OrdersTab'
 
 // Same key the old per-tab pickers used, so nobody loses their place when
@@ -70,6 +71,7 @@ const NAV_GROUPS = [
       { key: 'invites', label: 'Invites' },
       { key: 'allotments', label: 'Allotments' },
       { key: 'guests', label: 'Guest list' },
+      { key: 'seating-summary', label: 'Seating summary' },
     ],
   },
 ]
@@ -190,6 +192,8 @@ export default function Dashboard() {
         return <GuestListTab key={eventId} {...props} />
       case 'sales':
         return <SalesReferralsTab key={eventId} {...props} />
+      case 'seating-summary':
+        return <SeatingSummaryTab key={eventId} {...props} />
       case 'settings':
         return <EventSettingsTab key={eventId} {...props} />
       case 'tickets':

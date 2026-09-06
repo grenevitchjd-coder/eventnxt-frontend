@@ -1,9 +1,7 @@
 // eventnxt-frontend: src/components/SalesReferralsTab.jsx
 //
 // "Promos & referrals" tab. Event context comes from the Dashboard shell.
-import { Fragment, useEffect, useRef, useState } from 'react'
-import Papa from 'papaparse'
-import * as XLSX from 'xlsx'
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api'
 
 const selectStyle = {
@@ -20,51 +18,6 @@ const REWARD_TYPE_LABELS = {
   percentage: 'Percentage of sale',
   free_tickets: 'Free tickets',
   points: 'Points',
-}
-
-// ---------- Sales CSV import parsing helpers ----------
-
-const SALE_HEADER_ALIASES = {
-  buyername: 'buyer_name',
-  name: 'buyer_name',
-  buyeremail: 'buyer_email',
-  email: 'buyer_email',
-  amount: 'amount',
-  price: 'amount',
-  tickettype: 'ticket_type',
-  type: 'ticket_type',
-  category: 'ticket_type',
-  quantity: 'quantity',
-  qty: 'quantity',
-  promocode: 'promo_code',
-  code: 'promo_code',
-  saledate: 'sale_date',
-  date: 'sale_date',
-  externaltransactionid: 'external_transaction_id',
-  orderid: 'external_transaction_id',
-  transactionid: 'external_transaction_id',
-}
-
-const normalizeSaleHeader = (h) => (h || '').toString().toLowerCase().replace(/[^a-z]/g, '')
-
-function saleRowsFromRecords(records) {
-  return records.map((record) => {
-    const mapped = {}
-    for (const [rawKey, value] of Object.entries(record)) {
-      const field = SALE_HEADER_ALIASES[normalizeSaleHeader(rawKey)]
-      if (field) mapped[field] = (value ?? '').toString().trim()
-    }
-    return {
-      buyer_name: mapped.buyer_name || '',
-      buyer_email: mapped.buyer_email || '',
-      amount: mapped.amount || '',
-      ticket_type: mapped.ticket_type || '',
-      quantity: mapped.quantity || '1',
-      promo_code: mapped.promo_code || '',
-      sale_date: mapped.sale_date || '',
-      external_transaction_id: mapped.external_transaction_id || '',
-    }
-  })
 }
 
 export default function SalesReferralsTab({ onToast, eventId }) {
@@ -406,86 +359,6 @@ export default function SalesReferralsTab({ onToast, eventId }) {
       loadAll(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
-    }
-  }
-
-  // ---------- Sales CSV/Excel import ----------
-
-  const fileInputRef = useRef(null)
-  const [stagedSaleRows, setStagedSaleRows] = useState(null)
-  const [importingSales, setImportingSales] = useState(false)
-
-  const downloadSalesTemplate = () => {
-    const csv = Papa.unparse({
-      fields: ['Buyer Name', 'Buyer Email', 'Amount', 'Ticket Type', 'Quantity', 'Promo Code', 'Sale Date', 'External Transaction ID'],
-      data: [['Jane Buyer', 'jane@example.com', '50', 'GA', '1', promoCodes?.[0]?.code || 'CODE10', '2026-06-11', 'ORDER-001']],
-    })
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'sales-import-template.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const handleSalesFileSelected = async (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    try {
-      let records
-      if (file.name.toLowerCase().endsWith('.csv')) {
-        const text = await file.text()
-        records = Papa.parse(text, { header: true, skipEmptyLines: true }).data
-      } else {
-        const buffer = await file.arrayBuffer()
-        const workbook = XLSX.read(buffer, { type: 'array' })
-        records = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' })
-      }
-      if (!records.length) {
-        onToast('No rows found in that file', true)
-        return
-      }
-      setStagedSaleRows(saleRowsFromRecords(records))
-      onToast(`Loaded ${records.length} row(s) — review before importing`)
-    } catch (err) {
-      onToast(`Couldn't read that file: ${err.message}`, true)
-    }
-  }
-
-  const updateStagedSaleRow = (index, changes) => {
-    setStagedSaleRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...changes } : row)))
-  }
-  const removeStagedSaleRow = (index) => setStagedSaleRows((prev) => prev.filter((_, i) => i !== index))
-  const clearStagedSales = () => setStagedSaleRows(null)
-
-  const runSalesImport = async () => {
-    setImportingSales(true)
-    try {
-      const rows = stagedSaleRows.map((r) => ({
-        buyer_name: r.buyer_name || null,
-        buyer_email: r.buyer_email || null,
-        amount: r.amount ? Number(r.amount) : null,
-        ticket_type: r.ticket_type || null,
-        quantity: Number(r.quantity) || 1,
-        promo_code: r.promo_code || null,
-        sale_date: r.sale_date || null,
-        external_transaction_id: r.external_transaction_id || null,
-      }))
-      const result = await api.importSales(loadedEventId, rows)
-      onToast(
-        `Imported ${result.imported}${result.skipped_duplicates > 0 ? `, ${result.skipped_duplicates} duplicate(s) skipped` : ''}${
-          result.unmatched_code_count > 0 ? `, ${result.unmatched_code_count} unmatched code(s)` : ''
-        }`,
-        result.unmatched_code_count > 0
-      )
-      setStagedSaleRows(null)
-      loadAll(loadedEventId)
-    } catch (err) {
-      onToast(err.message, true)
-    } finally {
-      setImportingSales(false)
     }
   }
 
@@ -1132,135 +1005,6 @@ export default function SalesReferralsTab({ onToast, eventId }) {
             </tbody>
           </table>
 
-          {/* ---------- Sales import ---------- */}
-          <div className="panel">
-            <div className="panel-title">Import box office sales</div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
-              Columns: Buyer Name, Buyer Email, Amount, Ticket Type, Quantity (defaults to 1), Promo Code
-              (optional), Sale Date, External Transaction ID (recommended — prevents double-counting if you
-              re-upload the same export later).
-            </p>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                onChange={handleSalesFileSelected}
-                style={{ display: 'none' }}
-              />
-              <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
-                Choose file…
-              </button>
-              <button className="btn btn-secondary" onClick={downloadSalesTemplate}>
-                Download template
-              </button>
-            </div>
-          </div>
-
-          {stagedSaleRows && (
-            <div className="panel">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <div className="panel-title" style={{ margin: 0 }}>
-                  {stagedSaleRows.length} row{stagedSaleRows.length === 1 ? '' : 's'} staged
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-secondary btn-sm" onClick={clearStagedSales} disabled={importingSales}>
-                    Clear
-                  </button>
-                  <button className="btn btn-secondary btn-sm" onClick={runSalesImport} disabled={importingSales}>
-                    {importingSales ? 'Importing…' : `Import ${stagedSaleRows.length} sale(s)`}
-                  </button>
-                </div>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Buyer</th>
-                    <th>Email</th>
-                    <th>Amount</th>
-                    <th>Ticket type</th>
-                    <th>Qty</th>
-                    <th>Promo code</th>
-                    <th>Order ID</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stagedSaleRows.map((row, i) => (
-                    <tr key={i}>
-                      <td>
-                        <input
-                          value={row.buyer_name}
-                          onChange={(e) => updateStagedSaleRow(i, { buyer_name: e.target.value })}
-                          style={{ width: '100%' }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.buyer_email}
-                          onChange={(e) => updateStagedSaleRow(i, { buyer_email: e.target.value })}
-                          style={{ width: '100%' }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.amount}
-                          onChange={(e) => updateStagedSaleRow(i, { amount: e.target.value })}
-                          style={{ width: 70 }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.ticket_type}
-                          onChange={(e) => updateStagedSaleRow(i, { ticket_type: e.target.value })}
-                          style={{ width: 90 }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.quantity}
-                          onChange={(e) => updateStagedSaleRow(i, { quantity: e.target.value })}
-                          style={{ width: 50 }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.promo_code}
-                          onChange={(e) => updateStagedSaleRow(i, { promo_code: e.target.value })}
-                          style={{ width: 90 }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.external_transaction_id}
-                          onChange={(e) => updateStagedSaleRow(i, { external_transaction_id: e.target.value })}
-                          style={{ width: 100 }}
-                          disabled={importingSales}
-                        />
-                      </td>
-                      <td className="actions-cell">
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => removeStagedSaleRow(i)}
-                          disabled={importingSales}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* ---------- Sales audit list ---------- */}
           <div className="panel">
             <div className="panel-title">Sales</div>
           </div>
