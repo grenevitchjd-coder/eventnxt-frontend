@@ -26,6 +26,11 @@ export default function PublicReferrerPage() {
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
+  const [tab, setTab] = useState('progress') // 'progress' | 'refer'
+  const [referCodeId, setReferCodeId] = useState(null)
+  const emptyRow = () => ({ name: '', email: '' })
+  const [rows, setRows] = useState([emptyRow()])
+  const [referNotice, setReferNotice] = useState(null)
 
   useEffect(() => {
     fetch(`${API_URL}/public/rsvp/${token}`)
@@ -56,6 +61,35 @@ export default function PublicReferrerPage() {
     }
   }
 
+  const handleRefer = async () => {
+    const contacts = rows.filter((r) => r.name.trim() && r.email.trim())
+    if (contacts.length === 0) {
+      setSubmitError('Add at least one name and email.')
+      return
+    }
+    const codeId = referCodeId || (info.referral_codes?.[0]?.promo_code_id ?? null)
+    if (!codeId) return
+    setSubmitting(true)
+    setSubmitError(null)
+    setReferNotice(null)
+    try {
+      const res = await fetch(`${API_URL}/public/rsvp/${token}/refer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promo_code_id: codeId, contacts }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Something went wrong')
+      setInfo(data)
+      setRows([emptyRow()])
+      setReferNotice(`Sent ${contacts.length} invite${contacts.length === 1 ? '' : 's'} — you'll see clicks and purchases below as they happen.`)
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (error) {
     return (
       <div className="public-page" style={{ maxWidth: 560, margin: '60px auto', padding: '0 16px' }}>
@@ -74,11 +108,58 @@ export default function PublicReferrerPage() {
         Your referral page — share your code, watch your rewards, claim them here.
       </p>
 
+      <div style={{ display: 'flex', gap: 8, margin: '14px 0 6px' }}>
+        <button className={`btn btn-small ${tab === 'progress' ? 'btn-secondary' : 'btn-ghost'}`}
+                onClick={() => setTab('progress')}>
+          Your progress
+        </button>
+        <button className={`btn btn-small ${tab === 'refer' ? 'btn-secondary' : 'btn-ghost'}`}
+                onClick={() => setTab('refer')}>
+          Refer people
+        </button>
+      </div>
+
       {submitError && (
         <p style={{ color: 'var(--danger, #b3261e)', fontSize: 13.5 }}>{submitError}</p>
       )}
 
-      {codes.length === 0 ? (
+      {tab === 'refer' ? (
+        <div className="panel" style={{ textAlign: 'left', marginTop: 14 }}>
+          <div className="panel-title">Invite people by email</div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -6 }}>
+            Each person gets their own tracked invite from EventNXT — you'll see who clicked and who
+            bought, person by person, on Your progress.
+          </p>
+          {codes.length > 1 && (
+            <div className="field" style={{ maxWidth: 260, marginBottom: 10 }}>
+              <label>Send with code</label>
+              <select value={referCodeId || codes[0].promo_code_id}
+                      onChange={(e) => setReferCodeId(e.target.value)}>
+                {codes.map((c) => (
+                  <option key={c.promo_code_id} value={c.promo_code_id}>{c.code}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {rows.map((row, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <input placeholder="Name" value={row.name} style={{ flex: 1, minWidth: 140 }}
+                     onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+              <input placeholder="Email" type="email" value={row.email} style={{ flex: 2, minWidth: 200 }}
+                     onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button className="btn btn-ghost btn-small" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
+              + Another person
+            </button>
+            <button className="btn btn-secondary btn-small" disabled={submitting} onClick={handleRefer}>
+              Send invites
+            </button>
+          </div>
+          {referNotice && <p style={{ fontSize: 13, marginTop: 10 }}>{referNotice}</p>}
+        </div>
+      ) : codes.length === 0 ? (
         <p className="empty-state">No referral codes on this link yet — check with the organizer.</p>
       ) : (
         codes.map((c) => (
@@ -165,6 +246,47 @@ export default function PublicReferrerPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {c.contacts?.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <strong style={{ fontSize: 13 }}>People you've invited</strong>
+                <table className="data-table" style={{ marginTop: 6 }}>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Bought</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {c.contacts.map((ct, i) => (
+                      <tr key={i}>
+                        <td>
+                          {ct.name}
+                          <span className="mono" style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>
+                            {ct.email}
+                          </span>
+                        </td>
+                        <td>
+                          {ct.tickets_bought > 0 ? (
+                            <span className="pill pill-confirmed">bought</span>
+                          ) : ct.clicked ? (
+                            <span className="pill pill-pending">clicked</span>
+                          ) : ct.sent_at ? (
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>invited</span>
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>not sent</span>
+                          )}
+                        </td>
+                        <td className="mono" style={{ textAlign: 'right' }}>
+                          {ct.tickets_bought > 0 ? `${ct.tickets_bought} · $${Number(ct.amount_bought).toFixed(2)}` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 

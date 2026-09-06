@@ -90,9 +90,16 @@ export default function PublicEventPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const ref = (params.get('ref') || '').trim()
+    const refc = (params.get('r') || '').trim() // per-recipient outreach token (0044)
     if (ref) {
       localStorage.setItem(`eventnxt-ref-${slug}`, ref)
-      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(ref)}/click`, { method: 'POST' }).catch(() => {})
+      // Last click wins for the PERSON too: a fresh ref without a token
+      // clears the old token, so a later plain-link click doesn't keep
+      // crediting an earlier invite's sender.
+      if (refc) localStorage.setItem(`eventnxt-refc-${slug}`, refc)
+      else localStorage.removeItem(`eventnxt-refc-${slug}`)
+      const rq = refc ? `?r=${encodeURIComponent(refc)}` : ''
+      fetch(`${API_URL}/public/events/${slug}/promo-codes/${encodeURIComponent(ref)}/click${rq}`, { method: 'POST' }).catch(() => {})
     }
     const remembered = ref || localStorage.getItem(`eventnxt-ref-${slug}`) || ''
     if (remembered) setBuyer((b) => (b.promo ? b : { ...b, promo: remembered }))
@@ -345,6 +352,9 @@ export default function PublicEventPage() {
         body: JSON.stringify({
           buyer_name: buyer.name,
           buyer_email: buyer.email,
+          // Silently ignored server-side when stale; a TYPED different
+          // code beats it (the locked attribution policy).
+          referral_contact_token: localStorage.getItem(`eventnxt-refc-${slug}`) || null,
           items: ticketTypes
             .filter((t) => qtyFor(t) > 0)
             .map((t) =>
@@ -704,7 +714,14 @@ export default function PublicEventPage() {
           profile.external_ticket_url && (
             <a
               className="btn btn-primary public-event-cta"
-              href={profile.external_ticket_url}
+              href={(() => {
+                const base = profile.external_ticket_url
+                const ref = localStorage.getItem(`eventnxt-ref-${slug}`)
+                if (!ref) return base
+                const sep = base.includes('?') ? '&' : '?'
+                const refc = localStorage.getItem(`eventnxt-refc-${slug}`)
+                return `${base}${sep}utm_source=eventnxt&utm_medium=referral&utm_campaign=${encodeURIComponent(ref)}${refc ? `&utm_content=${encodeURIComponent(refc)}` : ''}`
+              })()}
               target="_blank"
               rel="noreferrer"
             >
