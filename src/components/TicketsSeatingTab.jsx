@@ -11,6 +11,14 @@
 // Pools never sold (press rows, holds) live in the Comp-only areas
 // panel; guest-type priorities point at pools same as ever.
 //
+// NON-NATIVE events (external platform / invite-only) get the SAME
+// composer minus the selling fields (price, max/order, admits, day
+// fan-out): it creates bare structured pools — no ticket types — listed
+// in the "Your room" panel with the shared sections editor and seat
+// reserve picker. Those pools power comps, guest-type priorities, and
+// imported-sales reconciliation. Advice baked into the copy: one area
+// per product the outside platform sells, so CSV rows match cleanly.
+//
 // Event context (eventId) comes from the Dashboard shell; remounted via
 // key={eventId} on switch.
 
@@ -101,6 +109,13 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   // Comp-only areas
   const [compForm, setCompForm] = useState({ name: '', capacity: '' })
   const [creatingComp, setCreatingComp] = useState(false)
+
+  // Native = selling through EventNXT. Anything else (external platform,
+  // invite-only) still needs the ROOM built here: the same composer
+  // creates bare pools (no ticket types, no prices) that power comps,
+  // the guest list, and imported-sales reconciliation.
+  const mode = settings?.ticketing_mode
+  const selling = mode === 'native'
 
   const loadEventData = () => {
     Promise.all([api.listTicketTypes(eventId), api.listSeatingCategories(eventId)])
@@ -212,7 +227,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     }
     const ttName = composer.name.trim() || autoName()
     if (!ttName) {
-      onToast('Give this ticket type a name.', true)
+      onToast(selling ? 'Give this ticket type a name.' : 'Give this area a name.', true)
       return
     }
     // Duplicate-inventory guard: an "All days" type whose row/sections
@@ -220,7 +235,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     // nightly inventory, not a second copy of the room. Offer the pass;
     // Cancel keeps today's behavior (independent standalone seats).
     const wantsAllDays = eventDays.length > 0 && !composer.valid_date && eventSettings?.ticket_span === 'mixed'
-    if (wantsAllDays && composer.basis !== 'area') {
+    if (selling && wantsAllDays && composer.basis !== 'area') {
       const typedSig = JSON.stringify({
         row: normName(composer.basis === 'row' ? composer.row_label : ''),
         secs: parsedSections.map(normName).sort(),
@@ -277,6 +292,15 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       // 2. Member sections (row/table bases)
       if (composer.basis !== 'area') {
         await api.replaceZoneSections(eventId, pool.id, buildSectionsPayload())
+      }
+      // Non-native events stop here: the room area IS the deliverable —
+      // no ticket type, no price. Comps, priorities, and imported-sales
+      // reconciliation all key off the pool itself.
+      if (!selling) {
+        onToast(`"${ttName}" added — ${total} seats`)
+        setComposer(EMPTY_COMPOSER)
+        loadEventData()
+        return
       }
       // 3. The ticket type, inventory = the derived total
       const chosenDay = eventDays.length ? composer.valid_date || (eventSettings.ticket_span === 'per_day' ? eventDays[0] : '') : ''
@@ -512,11 +536,11 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     }
   }
 
-  const openSeatsView = (t) => {
-    const pool = poolFor(t)
-    if (!pool) return
+  // openId is whatever the calling list keys its expander rows on:
+  // the ticket type's id (native list) or the pool's own id (room list).
+  const loadSeatsInto = (openId, pool) => {
     setSectionsOpenId(null) // one expander at a time
-    setSeatsOpenId(t.id)
+    setSeatsOpenId(openId)
     setSeatsData(null)
     setSelectedSeats([])
     api
@@ -528,6 +552,12 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
       })
   }
 
+  const openSeatsView = (t) => {
+    const pool = poolFor(t)
+    if (!pool) return
+    loadSeatsInto(t.id, pool)
+  }
+
   const toggleSeat = (seat) => {
     if (seat.status === 'sold' || seat.status === 'held') return
     setSelectedSeats((prev) => (prev.includes(seat.id) ? prev.filter((x) => x !== seat.id) : [...prev, seat.id]))
@@ -537,8 +567,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
   const canReserve = selectedSeats.length > 0 && selectedStatuses.every((s) => s === 'available')
   const canRelease = selectedSeats.length > 0 && selectedStatuses.every((s) => s === 'reserved')
 
-  const applySeats = async (t, action) => {
-    const pool = poolFor(t)
+  const applySeatsForPool = async (pool, action) => {
     if (!pool) return
     setSavingSeats(true)
     try {
@@ -603,10 +632,9 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     return groups
   }
 
-  const openSectionsEditor = (t) => {
-    const pool = poolFor(t)
+  const openSectionsInto = (openId, pool) => {
     setSeatsOpenId(null) // one expander at a time
-    setSectionsOpenId(t.id)
+    setSectionsOpenId(openId)
     setSectionsDraft(
       (pool?.sections || []).map((sx) => ({
         section_label: sx.section_label,
@@ -618,19 +646,41 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     )
   }
 
+  const openSectionsEditor = (t) => openSectionsInto(t.id, poolFor(t))
+
+  const sectionsDraftPayload = () =>
+    sectionsDraft.map((d) => ({
+      section_label: d.section_label,
+      row_label: d.row_label || null,
+      capacity: Number(d.capacity) || 1,
+      table_count: d.table_count ? Number(d.table_count) : null,
+      seats_per_table: d.seats_per_table ? Number(d.seats_per_table) : null,
+    }))
+
+  // Pool-level save (room list, non-native): no ticket type exists, so
+  // there's no inventory number to keep in step — the pool's derived
+  // capacity IS the number everything reads.
+  const saveSectionsForPool = async (pool) => {
+    if (!pool) return
+    setSavingSections(true)
+    try {
+      const updatedPool = await api.replaceZoneSections(eventId, pool.id, sectionsDraftPayload())
+      onToast(`Sections saved — ${updatedPool.capacity} seats total`)
+      setSectionsOpenId(null)
+      loadEventData()
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingSections(false)
+    }
+  }
+
   const saveSections = async (t) => {
     const pool = poolFor(t)
     if (!pool) return
     setSavingSections(true)
     try {
-      const payload = sectionsDraft.map((d) => ({
-        section_label: d.section_label,
-        row_label: d.row_label || null,
-        capacity: Number(d.capacity) || 1,
-        table_count: d.table_count ? Number(d.table_count) : null,
-        seats_per_table: d.seats_per_table ? Number(d.seats_per_table) : null,
-      }))
-      const updatedPool = await api.replaceZoneSections(eventId, pool.id, payload)
+      const updatedPool = await api.replaceZoneSections(eventId, pool.id, sectionsDraftPayload())
       // Keep ticket inventory in step with the derived seating total.
       await api.updateTicketType(eventId, t.id, {
         ...toPayload(
@@ -741,10 +791,190 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
     fontFamily: 'inherit',
   }
 
-  if (!settings || ticketTypes === null || categories === null) return null
+  // ---------- Shared expander rows ----------
+  // One implementation serving BOTH lists (native ticket types, and the
+  // non-native room list): colSpan matches the host table, heading and
+  // save handler come from the caller.
 
-  const mode = settings.ticketing_mode
-  const selling = mode === 'native'
+  const sectionsExpanderRow = (colSpan, heading, onSave) => (
+    <tr>
+      <td colSpan={colSpan} style={{ background: 'var(--surface-alt)' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
+          {heading}
+        </div>
+        {sectionsDraft.length === 0 && (
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 0 }}>
+            No breakdown yet — add sections to split this pool.
+          </p>
+        )}
+        {sectionsDraft.map((d, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+            <input
+              placeholder="Section"
+              style={{ width: 90 }}
+              value={d.section_label}
+              onChange={(e) =>
+                setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, section_label: e.target.value } : x)))
+              }
+            />
+            <input
+              placeholder="Row"
+              style={{ width: 80 }}
+              value={d.row_label}
+              onChange={(e) =>
+                setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, row_label: e.target.value } : x)))
+              }
+            />
+            {d.table_count || d.seats_per_table ? (
+              <>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Tables"
+                  style={{ width: 70 }}
+                  value={d.table_count}
+                  onChange={(e) =>
+                    setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, table_count: e.target.value } : x)))
+                  }
+                />
+                ×
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Seats"
+                  style={{ width: 70 }}
+                  value={d.seats_per_table}
+                  onChange={(e) =>
+                    setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, seats_per_table: e.target.value } : x)))
+                  }
+                />
+              </>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                placeholder="Seats"
+                style={{ width: 80 }}
+                value={d.capacity}
+                onChange={(e) =>
+                  setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, capacity: e.target.value } : x)))
+                }
+              />
+            )}
+            <button
+              className="btn btn-danger btn-sm"
+              type="button"
+              onClick={() => setSectionsDraft(sectionsDraft.filter((_, j) => j !== i))}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={() =>
+              setSectionsDraft([...sectionsDraft, { section_label: '', row_label: '', capacity: '', table_count: '', seats_per_table: '' }])
+            }
+          >
+            + Add section
+          </button>
+          <button className="btn btn-primary btn-sm" type="button" disabled={savingSections} onClick={onSave}>
+            {savingSections ? 'Saving…' : 'Save sections'}
+          </button>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSectionsOpenId(null)}>
+            Close
+          </button>
+        </div>
+        <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+          {selling
+            ? 'Saving re-derives the pool capacity and keeps the ticket quantity in step.'
+            : 'Saving re-derives the area\u2019s capacity from the section totals.'}
+        </p>
+      </td>
+    </tr>
+  )
+
+  const seatsExpanderRow = (colSpan, heading, pool, emptyHint) => (
+    <tr>
+      <td colSpan={colSpan} style={{ background: 'var(--surface-alt)' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
+          {heading}
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
+          Click seats, then reserve them with a label (&ldquo;Press&rdquo;) — reserved seats
+          can&apos;t be {selling ? 'bought' : 'given away'} until released.
+          {selling ? ' Buyers just see them as unavailable.' : ''}
+        </p>
+        {seatsData === null ? (
+          <p style={{ fontSize: 13 }}>Loading seats…</p>
+        ) : seatsData.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{emptyHint}</p>
+        ) : (
+          <>
+            {seatGroups(seatsData).map((g) => (
+              <div key={`${g.section_label}|${g.row_label}`} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Section {g.section_label}
+                  {g.row_label ? ` · ${g.row_label}` : ''}
+                </div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {g.seats.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      style={seatChipStyle(s, selectedSeats.includes(s.id))}
+                      title={
+                        s.status === 'reserved'
+                          ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
+                          : `${s.label} — ${s.status}`
+                      }
+                      onClick={() => toggleSeat(s)}
+                    >
+                      {s.seat_number}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+              <input
+                placeholder="Label (Press, Sponsor…)"
+                style={{ width: 170 }}
+                value={reserveLabel}
+                onChange={(e) => setReserveLabel(e.target.value)}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                type="button"
+                disabled={!canReserve || savingSeats}
+                onClick={() => applySeatsForPool(pool, 'reserve')}
+              >
+                {savingSeats ? 'Saving…' : `Reserve${selectedSeats.length ? ` ${selectedSeats.length}` : ''}`}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                disabled={!canRelease || savingSeats}
+                onClick={() => applySeatsForPool(pool, 'release')}
+              >
+                Release{canRelease ? ` ${selectedSeats.length}` : ''}
+              </button>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSeatsOpenId(null)}>
+                Close
+              </button>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                Solid = pick to reserve · dashed = reserved (pick to release) · struck = sold or in a cart
+              </span>
+            </div>
+          </>
+        )}
+      </td>
+    </tr>
+  )
+
+  if (!settings || ticketTypes === null || categories === null) return null
 
   return (
     <>
@@ -776,9 +1006,15 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         </div>
       )}
 
-      {selling && (
-        <div className="panel">
-          <div className="panel-title">Add a ticket type</div>
+      <div className="panel">
+          <div className="panel-title">{selling ? 'Add a ticket type' : 'Add an area'}</div>
+          {!selling && (
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+              Mirror your outside platform&apos;s product list — one area per product it sells
+              (&ldquo;Row 2 Preferred&rdquo;, &ldquo;Standing Room&rdquo;) — and imported sales, comps,
+              and the summaries will all reconcile per product.
+            </p>
+          )}
           <form onSubmit={handleCompose}>
             <div className="inline-form">
               <div className="field" style={{ flex: 1, minWidth: 170 }}>
@@ -791,19 +1027,21 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   onChange={(e) => setComposer({ ...composer, name: e.target.value })}
                 />
               </div>
-              <div className="field" style={{ width: 100 }}>
-                <label htmlFor="tt-price">Price ($)</label>
-                <input
-                  id="tt-price"
-                  required
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={composer.price}
-                  onChange={(e) => setComposer({ ...composer, price: e.target.value })}
-                />
-              </div>
-              {eventDays.length > 0 && (
+              {selling && (
+                <div className="field" style={{ width: 100 }}>
+                  <label htmlFor="tt-price">Price ($)</label>
+                  <input
+                    id="tt-price"
+                    required
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={composer.price}
+                    onChange={(e) => setComposer({ ...composer, price: e.target.value })}
+                  />
+                </div>
+              )}
+              {selling && eventDays.length > 0 && (
                 <div className="field">
                   <label htmlFor="tt-day">Day</label>
                   <select
@@ -847,22 +1085,24 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   <option value="table">Tables</option>
                 </select>
               </div>
-              <div className="field" style={{ width: 100 }}>
-                <label htmlFor="tt-max">Max / order</label>
-                <input
-                  id="tt-max"
-                  type="number"
-                  min={1}
-                  value={composer.max_per_order}
-                  onChange={(e) => setComposer({ ...composer, max_per_order: e.target.value })}
-                />
-              </div>
+              {selling && (
+                <div className="field" style={{ width: 100 }}>
+                  <label htmlFor="tt-max">Max / order</label>
+                  <input
+                    id="tt-max"
+                    type="number"
+                    min={1}
+                    value={composer.max_per_order}
+                    onChange={(e) => setComposer({ ...composer, max_per_order: e.target.value })}
+                  />
+                </div>
+              )}
             </div>
 
             {composer.basis === 'area' && (
               <div className="inline-form" style={{ marginTop: 4 }}>
                 <div className="field" style={{ width: 150 }}>
-                  <label htmlFor="tt-area-cap">{Number(composer.admits) > 1 ? 'Quantity for sale' : 'Capacity'}</label>
+                  <label htmlFor="tt-area-cap">{selling && Number(composer.admits) > 1 ? 'Quantity for sale' : 'Capacity'}</label>
                   <input
                     id="tt-area-cap"
                     type="number"
@@ -872,17 +1112,19 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     onChange={(e) => setComposer({ ...composer, area_capacity: e.target.value })}
                   />
                 </div>
-                <div className="field" style={{ width: 110 }}>
-                  <label htmlFor="tt-admits">Each admits</label>
-                  <input
-                    id="tt-admits"
-                    type="number"
-                    min={1}
-                    value={composer.admits}
-                    onChange={(e) => setComposer({ ...composer, admits: e.target.value })}
-                  />
-                </div>
-                {Number(composer.admits) > 1 && Number(composer.area_capacity) > 0 && (
+                {selling && (
+                  <div className="field" style={{ width: 110 }}>
+                    <label htmlFor="tt-admits">Each admits</label>
+                    <input
+                      id="tt-admits"
+                      type="number"
+                      min={1}
+                      value={composer.admits}
+                      onChange={(e) => setComposer({ ...composer, admits: e.target.value })}
+                    />
+                  </div>
+                )}
+                {selling && Number(composer.admits) > 1 && Number(composer.area_capacity) > 0 && (
                   <span style={{ alignSelf: 'flex-end', paddingBottom: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>
                     = {Number(composer.area_capacity) * Math.max(1, parseInt(composer.admits, 10) || 1)} people
                   </span>
@@ -952,7 +1194,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
               </div>
             )}
 
-            {composer.basis === 'table' && (
+            {selling && composer.basis === 'table' && (
               <div className="inline-form" style={{ marginTop: 4 }}>
                 <div className="field" style={{ width: 200 }}>
                   <label htmlFor="tt-sellby">Sold by</label>
@@ -1026,15 +1268,16 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                   : 'Total appears as you fill in capacities'}
               </span>
               <button className="btn btn-secondary" type="submit" disabled={creating}>
-                {creating ? 'Creating…' : 'Create ticket type'}
+                {creating ? 'Creating…' : selling ? 'Create ticket type' : 'Add to room'}
               </button>
             </div>
           </form>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-            Price $0 makes a free/comp ticket — buyers get it instantly, no payment step.
-          </p>
-        </div>
-      )}
+          {selling && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
+              Price $0 makes a free/comp ticket — buyers get it instantly, no payment step.
+            </p>
+          )}
+      </div>
 
       {selling && eventDays.length > 1 && ['per_day', 'mixed'].includes(eventSettings?.ticket_span) && (
         <div
@@ -1257,103 +1500,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                         </td>
                       </tr>
                     )}
-                    {sectionsOpenId === t.id && (
-                      <tr>
-                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
-                            {t.name} — sections
-                          </div>
-                          {sectionsDraft.length === 0 && (
-                            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 0 }}>
-                              No breakdown yet — add sections to split this pool.
-                            </p>
-                          )}
-                          {sectionsDraft.map((d, i) => (
-                            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-                              <input
-                                placeholder="Section"
-                                style={{ width: 90 }}
-                                value={d.section_label}
-                                onChange={(e) =>
-                                  setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, section_label: e.target.value } : x)))
-                                }
-                              />
-                              <input
-                                placeholder="Row"
-                                style={{ width: 80 }}
-                                value={d.row_label}
-                                onChange={(e) =>
-                                  setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, row_label: e.target.value } : x)))
-                                }
-                              />
-                              {d.table_count || d.seats_per_table ? (
-                                <>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    placeholder="Tables"
-                                    style={{ width: 70 }}
-                                    value={d.table_count}
-                                    onChange={(e) =>
-                                      setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, table_count: e.target.value } : x)))
-                                    }
-                                  />
-                                  ×
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    placeholder="Seats"
-                                    style={{ width: 70 }}
-                                    value={d.seats_per_table}
-                                    onChange={(e) =>
-                                      setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, seats_per_table: e.target.value } : x)))
-                                    }
-                                  />
-                                </>
-                              ) : (
-                                <input
-                                  type="number"
-                                  min={1}
-                                  placeholder="Seats"
-                                  style={{ width: 80 }}
-                                  value={d.capacity}
-                                  onChange={(e) =>
-                                    setSectionsDraft(sectionsDraft.map((x, j) => (j === i ? { ...x, capacity: e.target.value } : x)))
-                                  }
-                                />
-                              )}
-                              <button
-                                className="btn btn-danger btn-sm"
-                                type="button"
-                                onClick={() => setSectionsDraft(sectionsDraft.filter((_, j) => j !== i))}
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              type="button"
-                              onClick={() =>
-                                setSectionsDraft([...sectionsDraft, { section_label: '', row_label: '', capacity: '', table_count: '', seats_per_table: '' }])
-                              }
-                            >
-                              + Add section
-                            </button>
-                            <button className="btn btn-primary btn-sm" type="button" disabled={savingSections} onClick={() => saveSections(t)}>
-                              {savingSections ? 'Saving…' : 'Save sections'}
-                            </button>
-                            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSectionsOpenId(null)}>
-                              Close
-                            </button>
-                          </div>
-                          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8, marginBottom: 0 }}>
-                            Saving re-derives the pool capacity and keeps the ticket quantity in step.
-                          </p>
-                        </td>
-                      </tr>
-                    )}
+                    {sectionsOpenId === t.id && sectionsExpanderRow(9, `${t.name} — sections`, () => saveSections(t))}
                     {passOpenId === t.id && (
                       <tr>
                         <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
@@ -1434,84 +1581,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                         </td>
                       </tr>
                     )}
-                    {seatsOpenId === t.id && (
-                      <tr>
-                        <td colSpan={9} style={{ background: 'var(--surface-alt)' }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>
-                            {t.name} — reserved seats
-                          </div>
-                          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 10 }}>
-                            Click seats, then reserve them with a label (&ldquo;Press&rdquo;) — reserved seats
-                            can&apos;t be bought until released. Buyers just see them as unavailable.
-                          </p>
-                          {seatsData === null ? (
-                            <p style={{ fontSize: 13 }}>Loading seats…</p>
-                          ) : seatsData.length === 0 ? (
-                            <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                              No seats yet — save this type&apos;s sections first.
-                            </p>
-                          ) : (
-                            <>
-                              {seatGroups(seatsData).map((g) => (
-                                <div key={`${g.section_label}|${g.row_label}`} style={{ marginBottom: 10 }}>
-                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
-                                    Section {g.section_label}
-                                    {g.row_label ? ` · ${g.row_label}` : ''}
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                    {g.seats.map((s) => (
-                                      <button
-                                        key={s.id}
-                                        type="button"
-                                        style={seatChipStyle(s, selectedSeats.includes(s.id))}
-                                        title={
-                                          s.status === 'reserved'
-                                            ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
-                                            : `${s.label} — ${s.status}`
-                                        }
-                                        onClick={() => toggleSeat(s)}
-                                      >
-                                        {s.seat_number}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
-                                <input
-                                  placeholder="Label (Press, Sponsor…)"
-                                  style={{ width: 170 }}
-                                  value={reserveLabel}
-                                  onChange={(e) => setReserveLabel(e.target.value)}
-                                />
-                                <button
-                                  className="btn btn-primary btn-sm"
-                                  type="button"
-                                  disabled={!canReserve || savingSeats}
-                                  onClick={() => applySeats(t, 'reserve')}
-                                >
-                                  {savingSeats ? 'Saving…' : `Reserve${selectedSeats.length ? ` ${selectedSeats.length}` : ''}`}
-                                </button>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  type="button"
-                                  disabled={!canRelease || savingSeats}
-                                  onClick={() => applySeats(t, 'release')}
-                                >
-                                  Release{canRelease ? ` ${selectedSeats.length}` : ''}
-                                </button>
-                                <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSeatsOpenId(null)}>
-                                  Close
-                                </button>
-                                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                                  Solid = pick to reserve · dashed = reserved (pick to release) · struck = sold or in a cart
-                                </span>
-                              </div>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    )}
+                    {seatsOpenId === t.id && seatsExpanderRow(9, `${t.name} — reserved seats`, poolFor(t), 'No seats yet — save this type\u2019s sections first.')}
                   </Fragment>
                 )
               })
@@ -1521,13 +1591,101 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         </>
       )}
 
-      {/* ---------- Comp-only areas — never sold ---------- */}
+      {/* ---------- Your room (non-native): every pool, full structure ---------- */}
+      {!selling && (
+        <div className="panel">
+          <div className="panel-title">Your room</div>
+          {eventDays.length > 1 && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
+              This event runs multiple days. Day-by-day copies of an area are coming; until then,
+              name an area with the day (&ldquo;Row 1 (10/08)&rdquo;) and it files under that
+              day&apos;s chip above.
+            </p>
+          )}
+          {(categories || []).filter((c) => poolMatchesDay(c, categories)).length === 0 ? (
+            <p className="empty-state" style={{ fontSize: 13 }}>
+              {(categories || []).length === 0
+                ? 'No areas yet — add the first one above.'
+                : 'No areas for this day.'}
+            </p>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Area</th>
+                  <th>Capacity</th>
+                  <th className="col-flex"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(categories || []).filter((c) => poolMatchesDay(c, categories)).map((c) => {
+                  const dayOf = poolDayOf(c, categories)
+                  const breakdown = sectionSummaryLine(c)
+                  return (
+                    <Fragment key={c.id}>
+                      <tr>
+                        <td>
+                          <div>
+                            {c.name}
+                            {dayOf && (
+                              <span className="pill pill-pending" style={{ marginLeft: 6, fontSize: 10.5 }}>
+                                {eventDays.includes(dayOf) ? fmtChipDay(dayOf) : dayOf}
+                              </span>
+                            )}
+                          </div>
+                          {breakdown && (
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{breakdown}</div>
+                          )}
+                          {c.sales_grain === 'seat' && (
+                            <span className="pill pill-confirmed" style={{ fontSize: 10.5 }}>
+                              assigned seats
+                            </span>
+                          )}
+                          {c.sales_grain === 'table' && (
+                            <span className="pill pill-confirmed" style={{ fontSize: 10.5 }}>
+                              tables
+                            </span>
+                          )}
+                        </td>
+                        <td className="mono">{c.capacity}</td>
+                        <td className="actions-cell">
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => (sectionsOpenId === c.id ? setSectionsOpenId(null) : openSectionsInto(c.id, c))}
+                          >
+                            Sections
+                          </button>
+                          {c.sales_grain === 'seat' && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => (seatsOpenId === c.id ? setSeatsOpenId(null) : loadSeatsInto(c.id, c))}
+                            >
+                              Seats
+                            </button>
+                          )}
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteCompPool(c)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                      {sectionsOpenId === c.id && sectionsExpanderRow(3, `${c.name} — sections`, () => saveSectionsForPool(c))}
+                      {seatsOpenId === c.id && seatsExpanderRow(3, `${c.name} — reserved seats`, c, 'No seats yet — turn on assigned seating by saving sections for this area.')}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ---------- Comp-only areas — never sold (native events) ---------- */}
+      {selling && (
       <div className="panel">
         <div className="panel-title">Comp-only areas</div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: -4, marginBottom: 12 }}>
-          {selling
-            ? 'Areas that are never sold — a press row, a hold. Guest types\u2019 seating priorities can point here just like anywhere else.'
-            : 'The areas of your room — guest types\u2019 seating priorities draw from these.'}
+          Areas that are never sold — a press row, a hold. Guest types&apos; seating priorities can
+          point here just like anywhere else.
         </p>
         <form className="inline-form" onSubmit={handleCreateComp}>
           <div className="field">
@@ -1579,6 +1737,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
           </table>
         )}
       </div>
+      )}
 
       {/* ---------- Seating Summary — reconciliation ---------- */}
 
