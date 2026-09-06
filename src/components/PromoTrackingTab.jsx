@@ -1,28 +1,39 @@
 // eventnxt-frontend: src/components/PromoTrackingTab.jsx
 //
-// "Promo tracking" page (Promote group) — did the marketing codes work?
-// Per self-promo: tickets sold, dollars sold, transactions, link clicks,
-// straight from /promo-stats, which aggregates the same shared Sale
-// table both native checkout and CSV import write to — so the rollup
-// can never disagree with the raw Sales list underneath it.
+// "Promo tracking" page (Promote group) — CODE-FIRST, per Joshua's
+// redirect after the first cut: one row per promo with Code · Amount ·
+// Qty · Last updated, and each row expands to the individual sales
+// that used that code (the detail the old flat table showed for
+// everything at once). The rollup comes from /promo-stats (the shared
+// aggregator), the expanded detail from the same /sales rows the
+// rollup was computed over — so a row's numbers always equal the sum
+// of what its dropdown shows.
 //
-// Referral codes are deliberately absent here: a referral code's
-// numbers are about what its PERSON is owed, which is the Referral
-// payouts page's job. Same endpoint, different lens.
+// Sales with NO code sit in one muted "No promo code" row at the
+// bottom, expandable like the rest — organic sales stay visible
+// without pretending to be promo performance.
 //
-// The Sales platform picker and the raw sales list live at the bottom —
-// this page is where sale data is read, so it's where its source is
-// declared. (The box-office CSV upload itself stays on Seating summary,
-// next to the Sold column it moves.)
-import { useEffect, useState } from 'react'
+// Referral codes are deliberately absent: their numbers are about what
+// their PERSON is owed (Referral payouts). The Sales platform picker
+// stays at the bottom — this page is where sale data is read, so it's
+// where its source is declared (the CSV upload itself lives on Seating
+// summary).
+import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api'
 
 const money = (v) => `$${Number(v).toFixed(2)}`
+const when = (iso) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
 
 export default function PromoTrackingTab({ onToast, eventId }) {
   const [stats, setStats] = useState(null) // self promos only
   const [sales, setSales] = useState(null)
   const [salesConfig, setSalesConfig] = useState(null)
+  const [expandedId, setExpandedId] = useState(null) // code id | 'none' | null
 
   useEffect(() => {
     api
@@ -43,15 +54,60 @@ export default function PromoTrackingTab({ onToast, eventId }) {
     }
   }
 
+  const salesFor = (codeId) =>
+    (sales || []).filter((s) => (codeId === 'none' ? s.promo_code_id === null : s.promo_code_id === codeId))
+
+  const codelessSales = salesFor('none')
+  const codelessQty = codelessSales.reduce((sum, s) => sum + (s.quantity || 0), 0)
+  const codelessAmount = codelessSales.reduce((sum, s) => sum + (s.amount != null ? Number(s.amount) : 0), 0)
+
   const anyMissingAmount = (stats || []).some((r) => r.rows_missing_amount > 0)
+
+  const salesDetail = (rows) => (
+    <table className="data-table" style={{ margin: '4px 0 12px' }}>
+      <thead>
+        <tr>
+          <th>Buyer</th>
+          <th>Amount</th>
+          <th>Type</th>
+          <th>Qty</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <tr>
+            <td colSpan={5} className="empty-state">
+              No sales yet.
+            </td>
+          </tr>
+        ) : (
+          rows.map((s) => (
+            <tr key={s.id}>
+              <td>
+                {s.buyer_name || '—'}
+                <span className="mono" style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  {s.buyer_email}
+                </span>
+              </td>
+              <td className="mono">{s.amount != null ? s.amount : '—'}</td>
+              <td>{s.ticket_type || '—'}</td>
+              <td className="mono">{s.quantity}</td>
+              <td>{s.sale_date || '—'}</td>
+            </tr>
+          ))
+        )}
+      </tbody>
+    </table>
+  )
 
   return (
     <div>
       <h2 className="page-title">Promo tracking</h2>
       <p className="page-subtitle">
-        How each of your promos performed — tickets and dollars, counted the same whether the sale
-        happened at native checkout or arrived in a box-office import. Referrer earnings are tracked on
-        the Referral pages.
+        Each promo's results at a glance — expand a code to see the individual sales behind its numbers.
+        Native checkout and box-office imports count identically. Referrer earnings are tracked on the
+        Referral pages.
       </p>
 
       {stats !== null && (
@@ -59,47 +115,82 @@ export default function PromoTrackingTab({ onToast, eventId }) {
           <table className="data-table" style={{ marginBottom: anyMissingAmount ? 8 : 28 }}>
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Discount</th>
-                <th style={{ textAlign: 'right' }}>Tickets sold</th>
-                <th style={{ textAlign: 'right' }}>$ sold</th>
-                <th style={{ textAlign: 'right' }}>Transactions</th>
-                <th style={{ textAlign: 'right' }}>Link clicks</th>
+                <th></th>
+                <th>Promo code</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+                <th style={{ textAlign: 'right' }}>Qty</th>
+                <th>Last updated</th>
               </tr>
             </thead>
             <tbody>
               {stats.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty-state">
+                  <td colSpan={5} className="empty-state">
                     No promos yet — create them on the Promos page.
                   </td>
                 </tr>
               ) : (
                 stats.map((r) => (
-                  <tr key={r.id}>
-                    <td className="mono">{r.code}</td>
-                    <td>
-                      {r.discount_type
-                        ? r.discount_type === 'percentage'
-                          ? `${Number(r.discount_value)}% off`
-                          : `$${Number(r.discount_value)} off`
-                        : '—'}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {r.tickets_sold}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {money(r.amount_sold)}
-                      {r.rows_missing_amount > 0 && ' *'}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {r.sale_count}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>
-                      {r.link_clicks}
-                    </td>
-                  </tr>
+                  <Fragment key={r.id}>
+                    <tr
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    >
+                      <td style={{ width: 24, color: 'var(--text-muted)' }}>
+                        {expandedId === r.id ? '▾' : '▸'}
+                      </td>
+                      <td>
+                        <span className="mono">{r.code}</span>
+                        {r.discount_type && (
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            {' '}
+                            · {r.discount_type === 'percentage'
+                              ? `${Number(r.discount_value)}% off`
+                              : `$${Number(r.discount_value)} off`}
+                          </span>
+                        )}
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>
+                        {money(r.amount_sold)}
+                        {r.rows_missing_amount > 0 && ' *'}
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>
+                        {r.tickets_sold}
+                      </td>
+                      <td style={{ fontSize: 13 }}>{when(r.last_sale_at)}</td>
+                    </tr>
+                    {expandedId === r.id && (
+                      <tr>
+                        <td></td>
+                        <td colSpan={4}>{salesDetail(salesFor(r.id))}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))
+              )}
+              {codelessSales.length > 0 && (
+                <Fragment>
+                  <tr
+                    style={{ cursor: 'pointer', color: 'var(--text-muted)' }}
+                    onClick={() => setExpandedId(expandedId === 'none' ? null : 'none')}
+                  >
+                    <td style={{ width: 24 }}>{expandedId === 'none' ? '▾' : '▸'}</td>
+                    <td>No promo code</td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {money(codelessAmount)}
+                    </td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      {codelessQty}
+                    </td>
+                    <td></td>
+                  </tr>
+                  {expandedId === 'none' && (
+                    <tr>
+                      <td></td>
+                      <td colSpan={4}>{salesDetail(codelessSales)}</td>
+                    </tr>
+                  )}
+                </Fragment>
               )}
             </tbody>
           </table>
@@ -134,46 +225,6 @@ export default function PromoTrackingTab({ onToast, eventId }) {
               </div>
             </div>
           </div>
-
-          {/* ---------- Raw sales list ---------- */}
-          <div className="panel" style={{ paddingBottom: 0, border: 'none', background: 'transparent', paddingLeft: 0, paddingRight: 0 }}>
-            <div className="panel-title">Sales</div>
-          </div>
-          <table className="data-table" style={{ marginBottom: 28 }}>
-            <thead>
-              <tr>
-                <th>Buyer</th>
-                <th>Amount</th>
-                <th>Type</th>
-                <th>Qty</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales === null ? null : sales.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="empty-state">
-                    No sales recorded yet.
-                  </td>
-                </tr>
-              ) : (
-                sales.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      {s.buyer_name || '—'}
-                      <span className="mono" style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>
-                        {s.buyer_email}
-                      </span>
-                    </td>
-                    <td className="mono">{s.amount != null ? s.amount : '—'}</td>
-                    <td>{s.ticket_type || '—'}</td>
-                    <td className="mono">{s.quantity}</td>
-                    <td>{s.sale_date || '—'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
         </>
       )}
     </div>
