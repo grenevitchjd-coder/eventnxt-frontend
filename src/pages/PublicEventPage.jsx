@@ -1,6 +1,6 @@
 // eventnxt-frontend: src/pages/PublicEventPage.jsx
 import { Fragment, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { loadGoogleFont, SocialIcon, platformLabel } from '../socialAndFonts'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:9000'
@@ -56,6 +56,10 @@ const OVERLAY_LOGO_POSITIONS = ['top-left', 'top-center', 'top-right']
 export default function PublicEventPage() {
   const { slug } = useParams()
   const navigate = useNavigate()
+  // Two views, URL-driven so both are shareable: /e/<slug> = About,
+  // /e/<slug>/tickets = Tickets. One mount serves both, so tracked-link
+  // capture (?ref / ?r) works wherever the buyer lands.
+  const showTickets = useLocation().pathname.endsWith('/tickets')
   const [profile, setProfile] = useState(undefined) // undefined = loading, null = not found
   const [error, setError] = useState(false)
 
@@ -79,6 +83,7 @@ export default function PublicEventPage() {
   // null = nothing checked; {valid, discount_type, discount_value} once checked
   const [promoInfo, setPromoInfo] = useState(null)
   // Find-my-tickets mini-form: closed | open | sending | sent
+  const [dayFilter, setDayFilter] = useState('all') // 'all' | iso date | 'passes'
   const [findState, setFindState] = useState('closed')
   const [findEmail, setFindEmail] = useState('')
 
@@ -217,6 +222,8 @@ export default function PublicEventPage() {
     : []
 
   const anyDated = orderedTypes.some((t) => t.valid_date)
+  const anyUndated = orderedTypes.some((t) => !t.valid_date)
+  const eventDays = [...new Set(orderedTypes.map((t) => t.valid_date).filter(Boolean))].sort()
 
   const dayLabel = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
 
@@ -224,7 +231,7 @@ export default function PublicEventPage() {
 
     if (!anyDated) return null
 
-    const prev = i > 0 ? orderedTypes[i - 1].valid_date || '' : undefined
+    const prev = i > 0 ? visibleTypes[i - 1].valid_date || '' : undefined
 
     const cur = t.valid_date || ''
 
@@ -233,6 +240,17 @@ export default function PublicEventPage() {
     return cur ? dayLabel(cur) : 'All days'
 
   }
+  // Display-only day filter (2026-09-05): selections made on other days
+  // stay in the order — the total under the buyer form spans everything.
+  const visibleTypes =
+    dayFilter === 'all'
+      ? orderedTypes
+      : dayFilter === 'passes'
+        ? orderedTypes.filter((t) => !t.valid_date)
+        : orderedTypes.filter((t) => t.valid_date === dayFilter)
+  const hiddenSelectedCount = orderedTypes
+    .filter((t) => !visibleTypes.includes(t))
+    .reduce((sum, t) => sum + (quantities[t.id] || 0), 0)
   const loadSeatMap = (ttId) => {
     fetch(`${API_URL}/public/events/${slug}/ticket-types/${ttId}/seats`)
       .then((res) => (res.ok ? res.json() : null))
@@ -446,17 +464,69 @@ export default function PublicEventPage() {
         {profile.address && <p className="public-event-address">{profile.address}</p>}
         {profile.description && <p className="public-event-description">{profile.description}</p>}
 
+        {/* Two-page split (2026-09-05): About vs Tickets, tabbed and
+            URL-addressable. Only shown when there is any ticket UI. */}
+        {(hasNativeTickets || profile.external_ticket_url) && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '18px 0 6px' }}>
+            <button
+              className={`btn btn-small ${!showTickets ? 'btn-secondary' : 'btn-ghost'}`}
+              onClick={() => navigate(`/e/${slug}`)}
+            >
+              About
+            </button>
+            <button
+              className={`btn btn-small ${showTickets ? 'btn-secondary' : 'btn-ghost'}`}
+              onClick={() => navigate(`/e/${slug}/tickets`)}
+            >
+              Tickets
+            </button>
+          </div>
+        )}
+        {!showTickets && (hasNativeTickets || profile.external_ticket_url) && (
+          <div style={{ textAlign: 'center', margin: '10px 0 4px' }}>
+            <button className="btn btn-primary public-event-cta" onClick={() => navigate(`/e/${slug}/tickets`)}>
+              Get Tickets
+            </button>
+          </div>
+        )}
+
         {/* Native ticket sales, when this event has them — otherwise the
             external ticket link keeps working exactly as it always has.
             An event with NO ticket types and NO external link simply shows
             no ticket UI at all, same as before. */}
-        {hasNativeTickets ? (
+        {showTickets && hasNativeTickets ? (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>
               Tickets
             </h2>
+            {anyDated && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 10px' }}>
+                <button className={`btn btn-small ${dayFilter === 'all' ? 'btn-secondary' : 'btn-ghost'}`}
+                        onClick={() => setDayFilter('all')}>
+                  All days
+                </button>
+                {eventDays.map((d) => (
+                  <button key={d} className={`btn btn-small ${dayFilter === d ? 'btn-secondary' : 'btn-ghost'}`}
+                          onClick={() => setDayFilter(d)}>
+                    {new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })}
+                  </button>
+                ))}
+                {anyUndated && (
+                  <button className={`btn btn-small ${dayFilter === 'passes' ? 'btn-secondary' : 'btn-ghost'}`}
+                          onClick={() => setDayFilter('passes')}>
+                    Passes
+                  </button>
+                )}
+              </div>
+            )}
+            {hiddenSelectedCount > 0 && (
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                Also in your order: {hiddenSelectedCount} ticket{hiddenSelectedCount === 1 ? '' : 's'} from
+                other days — the total below includes everything.
+              </p>
+            )}
             <div className="ticket-picker">
-              {orderedTypes.map((t, ti) => {
+              {visibleTypes.map((t, ti) => {
                 const qty = quantities[t.id] || 0
                 const cap = unitCap(t)
                 return (
@@ -710,7 +780,7 @@ export default function PublicEventPage() {
               </form>
             )}
           </div>
-        ) : (
+        ) : showTickets ? (
           profile.external_ticket_url && (
             <a
               className="btn btn-primary public-event-cta"
@@ -728,9 +798,10 @@ export default function PublicEventPage() {
               Get Tickets
             </a>
           )
-        )}
+        ) : null}
 
         {/* Self-serve recovery — send-to-the-inbox, never display-for-a-typed-email. */}
+        {showTickets && (
         <div className="find-tickets">
           {findState === 'closed' && (
             <button type="button" className="find-tickets-link" onClick={() => setFindState('open')}>
@@ -757,8 +828,9 @@ export default function PublicEventPage() {
             </p>
           )}
         </div>
+        )}
 
-        {profile.venue_map_url && (
+        {showTickets && profile.venue_map_url && (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>
               Venue map
@@ -767,7 +839,7 @@ export default function PublicEventPage() {
           </div>
         )}
 
-        {profile.about_us && (
+        {!showTickets && profile.about_us && (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>
               About Us
@@ -776,7 +848,7 @@ export default function PublicEventPage() {
           </div>
         )}
 
-        {dailySchedule.length > 0 && (
+        {!showTickets && dailySchedule.length > 0 && (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>
               Daily Schedule
@@ -792,7 +864,7 @@ export default function PublicEventPage() {
           </div>
         )}
 
-        {specialSchedule.length > 0 && (
+        {!showTickets && specialSchedule.length > 0 && (
           <div className="public-event-section">
             <h2 className="public-event-section-title" style={displayFont}>
               Special Dates
@@ -808,7 +880,7 @@ export default function PublicEventPage() {
           </div>
         )}
 
-        {profile.photos && profile.photos.length > 0 && (
+        {!showTickets && profile.photos && profile.photos.length > 0 && (
           <div className="public-event-section">
             <div className="public-event-gallery">
               {profile.photos.map((photo, i) => (
@@ -820,7 +892,7 @@ export default function PublicEventPage() {
 
         {/* Contact emails keep their original spot and plain-text render —
             only socials moved up into the icon bar. */}
-        {contactLinks.length > 0 && (
+        {!showTickets && contactLinks.length > 0 && (
           <div className="public-event-section">
             <div className="public-event-contacts">
               {contactLinks.map((link, i) => (

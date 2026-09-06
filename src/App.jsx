@@ -22,6 +22,7 @@ export default function App() {
         <Route path="/auth/complete" element={<AuthComplete />} />
         {/* Public — no auth. The actual shareable page for an event. */}
         <Route path="/e/:slug" element={<PublicEventPage />} />
+        <Route path="/e/:slug/tickets" element={<PublicEventPage />} />
         {/* Public — no auth. A buyer's own order/tickets page — the Stripe
             success redirect, the email link, and Find My Tickets all land here. */}
         <Route path="/e/:slug/order/:token" element={<PublicOrderPage />} />
