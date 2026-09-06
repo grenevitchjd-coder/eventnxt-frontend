@@ -36,7 +36,7 @@ import AllotmentsTab from '../components/AllotmentsTab'
 import PromosTab from '../components/PromosTab'
 import PromoTrackingTab from '../components/PromoTrackingTab'
 import ReferralSetupTab from '../components/ReferralSetupTab'
-import SalesReferralsTab from '../components/SalesReferralsTab'
+import ReferralPayoutsTab from '../components/ReferralPayoutsTab'
 import SeatingSummaryTab from '../components/SeatingSummaryTab'
 import OrdersTab from '../components/OrdersTab'
 
@@ -68,7 +68,7 @@ const NAV_GROUPS = [
       { key: 'promos', label: 'Promos' },
       { key: 'promo-tracking', label: 'Promo tracking' },
       { key: 'referral-setup', label: 'Referral setup' },
-      { key: 'sales', label: 'Promos & referrals' },
+      { key: 'referral-payouts', label: 'Referral payouts' },
     ],
   },
   {
@@ -204,8 +204,8 @@ export default function Dashboard() {
         return <PromoTrackingTab key={eventId} {...props} />
       case 'referral-setup':
         return <ReferralSetupTab key={eventId} {...props} />
-      case 'sales':
-        return <SalesReferralsTab key={eventId} {...props} />
+      case 'referral-payouts':
+        return <ReferralPayoutsTab key={eventId} {...props} />
       case 'seating-summary':
         return <SeatingSummaryTab key={eventId} {...props} />
       case 'settings':

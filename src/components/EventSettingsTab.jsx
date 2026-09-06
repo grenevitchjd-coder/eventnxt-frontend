@@ -33,7 +33,7 @@ const TICKETING_MODES = [
 
 const SALES_SOURCES = [
   { value: 'native', label: 'Native orders', hint: 'Automatic — every EventNXT sale counts itself.' },
-  { value: 'csv', label: 'CSV import', hint: 'Import sales from your external platform (in Promos & referrals).' },
+  { value: 'csv', label: 'CSV import', hint: 'Import sales from your external platform (upload lives on Seating summary).' },
   { value: 'api', label: 'Partner API feed', hint: 'Coming soon.', disabled: true },
 ]
 

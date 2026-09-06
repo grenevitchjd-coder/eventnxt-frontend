@@ -753,7 +753,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         {selling
           ? 'Ticket types are your prices. Pick the basis — a named area, rows, or tables — and the form asks for exactly the structure that basis needs.'
           : mode === 'external'
-            ? 'Tickets for this event sell on your external platform — here you define the room itself, which powers the guest list, comps, and reconciliation. External sales come in via CSV import (Promos & referrals).'
+            ? 'Tickets for this event sell on your external platform — here you define the room itself, which powers the guest list, comps, and reconciliation. External sales come in via CSV import (upload on Seating summary; results on Promo tracking).'
             : 'This event is invite-only — no public sales. The areas here power the guest list, comps, and the reconciliation below.'}
       </p>
       {eventSettings && eventSettings.ticket_span !== 'single_day' && (
