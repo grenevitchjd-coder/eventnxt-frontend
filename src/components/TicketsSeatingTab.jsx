@@ -47,6 +47,7 @@ const EMPTY_COMPOSER = {
   assigned: false,
   row_label: '',
   section_names: '', // comma-separated: "A, B"
+  unit_label: '', // what to call one of these instead of "Section"/"Seat" — "Table", "Room", "Area"
   // generated per-section inputs, keyed by section name:
   section_caps: {}, // { A: '25', B: '25' }
   section_tables: {}, // { A: { tables: '4', seats: '8' } }
@@ -295,6 +296,7 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
         // math lands in step 2 and derives the true capacity
         table_count: grouped ? 1 : null,
         seats_per_table: grouped ? 1 : null,
+        unit_label: composer.unit_label || null,
       })
       // 2. Member sections (row/table bases)
       if (composer.basis !== 'area') {
@@ -1182,6 +1184,17 @@ export default function TicketsSeatingTab({ onToast, eventId }) {
                     placeholder="A, B"
                     value={composer.section_names}
                     onChange={(e) => setComposer({ ...composer, section_names: e.target.value })}
+                  />
+                </div>
+                <div className="field" style={{ width: 140 }}>
+                  <label htmlFor="tt-unit-label" title="What to call one of these on tickets and pickers instead of 'Section'/'Seat' — leave blank to keep the default">
+                    Call these… <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  <input
+                    id="tt-unit-label"
+                    placeholder="Table, Room…"
+                    value={composer.unit_label}
+                    onChange={(e) => setComposer({ ...composer, unit_label: e.target.value })}
                   />
                 </div>
               </div>

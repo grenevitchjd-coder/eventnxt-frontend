@@ -593,14 +593,14 @@ export default function PublicEventPage() {
                               value={(pickDraft[t.id] || {}).seat || ''}
                               onChange={(e) => setPickDraft({ ...pickDraft, [t.id]: { ...(pickDraft[t.id] || {}), seat: e.target.value } })}
                               disabled={(pickDraft[t.id] || {}).section === undefined || (pickDraft[t.id] || {}).section === ''}
-                              aria-label="Seat"
+                              aria-label={t.unit_label || 'Seat'}
                             >
-                              <option value="">Seat…</option>
+                              <option value="">{t.unit_label || 'Seat'}…</option>
                               {(((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])).map((x) => {
                                 const gone = !x.available || (seatPicks[t.id] || []).includes(x.id)
                                 return (
                                   <option key={x.id} value={x.id} disabled={gone} style={gone ? { color: '#999' } : undefined}>
-                                    Seat {x.seat_number}
+                                    {t.unit_label || 'Seat'} {x.seat_number}
                                     {gone ? ' — taken' : ''}
                                   </option>
                                 )
@@ -612,7 +612,7 @@ export default function PublicEventPage() {
                               onClick={() => addSeatPick(t)}
                               disabled={!(pickDraft[t.id] || {}).seat || qtyFor(t) >= Math.min(t.max_per_order, t.available)}
                             >
-                              Add seat
+                              Add {(t.unit_label || 'seat').toLowerCase()}
                             </button>
                           </>
                         )}
@@ -632,9 +632,9 @@ export default function PublicEventPage() {
                                 })
                                 setQuantities({ ...quantities, [t.id]: 0 })
                               }}
-                              aria-label={`Section for ${night.date || 'this night'}`}
+                              aria-label={`${t.unit_label || 'Section'} for ${night.date || 'this night'}`}
                             >
-                              <option value="">Section…</option>
+                              <option value="">{t.unit_label || 'Section'}…</option>
                               {(night.sections || []).map((x) => (
                                 <option key={x.id} value={x.id} disabled={x.remaining < 1}>
                                   {x.section_label}
@@ -661,7 +661,7 @@ export default function PublicEventPage() {
                         </div>
                         {unitCap(t) === 0 && qtyFor(t) === 0 && (
                           <span style={{ flexBasis: '100%', textAlign: 'right', fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            Pick a section for every night — a different one each night is fine.
+                            Pick a {(t.unit_label || 'section').toLowerCase()} for every night — a different one each night is fine.
                           </span>
                         )}
                       </div>
@@ -674,9 +674,9 @@ export default function PublicEventPage() {
                             setSectionChoice({ ...sectionChoice, [t.id]: e.target.value })
                             setQuantities({ ...quantities, [t.id]: 0 })
                           }}
-                          aria-label="Section"
+                          aria-label={t.unit_label || 'Section'}
                         >
-                          <option value="">Section…</option>
+                          <option value="">{t.unit_label || 'Section'}…</option>
                           {(t.sections || []).map((x) => {
                             const units = Math.floor(x.remaining / (t.admits || 1))
                             return (

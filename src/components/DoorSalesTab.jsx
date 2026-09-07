@@ -182,12 +182,13 @@ export default function DoorSalesTab({ onToast, eventId }) {
 
   const seatLabelFor = (ttId, seatId) => {
     const map = seatMaps[ttId]
-    if (!map) return 'Seat'
+    const word = (map && map.unit_label) || 'Seat'
+    if (!map) return word
     for (const sec of map.sections) {
       const hit = sec.seats.find((x) => x.id === seatId)
-      if (hit) return `${sec.section_label}${sec.row_label ? ` · ${sec.row_label}` : ''} · Seat ${hit.seat_number}`
+      if (hit) return `${sec.section_label}${sec.row_label ? ` · ${sec.row_label}` : ''} · ${word} ${hit.seat_number}`
     }
-    return 'Seat'
+    return word
   }
 
   const addSeatPick = (t) => {
@@ -412,15 +413,15 @@ export default function DoorSalesTab({ onToast, eventId }) {
                             setPickDraft({ ...pickDraft, [t.id]: { ...(pickDraft[t.id] || {}), seat: e.target.value } })
                           }
                           disabled={(pickDraft[t.id] || {}).section === undefined || (pickDraft[t.id] || {}).section === ''}
-                          aria-label="Seat"
+                          aria-label={t.unit_label || 'Seat'}
                         >
-                          <option value="">Seat…</option>
+                          <option value="">{t.unit_label || 'Seat'}…</option>
                           {(((seatMaps[t.id].sections[Number((pickDraft[t.id] || {}).section)] || {}).seats || [])).map(
                             (x) => {
                               const gone = !x.available || (seatPicks[t.id] || []).includes(x.id)
                               return (
                                 <option key={x.id} value={x.id} disabled={gone} style={gone ? { color: '#999' } : undefined}>
-                                  Seat {x.seat_number}
+                                  {t.unit_label || 'Seat'} {x.seat_number}
                                   {gone ? ' — taken' : ''}
                                 </option>
                               )
@@ -433,7 +434,7 @@ export default function DoorSalesTab({ onToast, eventId }) {
                           onClick={() => addSeatPick(t)}
                           disabled={!(pickDraft[t.id] || {}).seat || qtyFor(t) >= Math.min(t.max_per_order, t.available)}
                         >
-                          Add seat
+                          Add {(t.unit_label || 'seat').toLowerCase()}
                         </button>
                       </>
                     )}
@@ -447,9 +448,9 @@ export default function DoorSalesTab({ onToast, eventId }) {
                         setSectionChoice({ ...sectionChoice, [t.id]: e.target.value })
                         setQuantities({ ...quantities, [t.id]: 0 })
                       }}
-                      aria-label="Section"
+                      aria-label={t.unit_label || 'Section'}
                     >
-                      <option value="">Section…</option>
+                      <option value="">{t.unit_label || 'Section'}…</option>
                       {(t.sections || []).map((x) => {
                         const units = Math.floor(x.remaining / (t.admits || 1))
                         return (
