@@ -100,7 +100,8 @@ export default function InvitesTab({ onToast, eventId }) {
 
   // Reserved-seat assignment (guests in an assigned-seating area)
   const [seatsGuestId, setSeatsGuestId] = useState(null)
-  const [guestSeatMap, setGuestSeatMap] = useState(null) // null = loading
+  const [seatDays, setSeatDays] = useState(null) // one entry PER NIGHT for a multi-day guest
+  const [activeSeatDay, setActiveSeatDay] = useState(0)
   const [guestSeatSel, setGuestSeatSel] = useState([])
   const [savingGuestSeats, setSavingGuestSeats] = useState(false)
   const [guestEventSettings, setGuestEventSettings] = useState(null)
@@ -489,9 +490,17 @@ export default function InvitesTab({ onToast, eventId }) {
       return
     }
     if (!window.confirm(`Remove ${guest.name}?`)) return
+    // A seat stays reserved under the guest's name after removal by
+    // default — only ask when they actually had one assigned.
+    const hadSeats = (guest.seat_labels || []).length > 0
+    const releaseSeats = hadSeats
+      ? window.confirm(
+          `${guest.name} had a seat assigned (${guest.seat_labels.join(', ')}). Also release it back to general availability? (Cancel keeps it reserved under their name.)`
+        )
+      : false
     try {
-      await api.deleteGuest(loadedEventId, guest.id)
-      onToast(`${guest.name} removed`)
+      await api.deleteGuest(loadedEventId, guest.id, releaseSeats)
+      onToast(`${guest.name} removed${releaseSeats ? ' — seat released' : ''}`)
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)
@@ -713,13 +722,16 @@ export default function InvitesTab({ onToast, eventId }) {
 
   const openGuestSeats = (g) => {
     setSeatsGuestId(g.id)
-    setGuestSeatMap(null)
+    setSeatDays(null)
+    setActiveSeatDay(0)
     setGuestSeatSel([])
     api
-      .listPoolSeats(loadedEventId, g.seating_category_id)
-      .then((seatList) => {
-        setGuestSeatMap(seatList)
-        setGuestSeatSel(seatList.filter((s) => s.guest_id === g.id).map((s) => s.id))
+      .getGuestSeatDays(loadedEventId, g.id)
+      .then((days) => {
+        setSeatDays(days)
+        const mine = new Set()
+        days.forEach((d) => d.seats.forEach((s) => { if (s.guest_id === g.id) mine.add(s.id) }))
+        setGuestSeatSel([...mine])
       })
       .catch((e) => {
         onToast(e.message, true)
@@ -768,11 +780,37 @@ export default function InvitesTab({ onToast, eventId }) {
     setGuestSeatSel((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
   }
 
+  // Convenience for a multi-night guest: take a seat just picked on ONE
+  // night and find the SAME identity (section/row/number) on every
+  // OTHER night already loaded in seatDays — no extra round trip, since
+  // all nights' maps are fetched together by openGuestSeats. Skips a
+  // night where that identity is missing, sold, or someone else's.
+  const matchSeatEveryNight = (g, seat) => {
+    if (!seatDays || seatDays.length <= 1) return
+    const added = []
+    for (const day of seatDays) {
+      const already = day.seats.some((s) => s.id === seat.id)
+      if (already) continue
+      const sib = day.seats.find(
+        (s) =>
+          s.section_label === seat.section_label &&
+          (s.row_label || null) === (seat.row_label || null) &&
+          s.seat_number === seat.seat_number
+      )
+      if (sib && (!sib.guest_id || sib.guest_id === g.id) && sib.status !== 'sold') added.push(sib.id)
+    }
+    setGuestSeatSel((prev) => [...new Set([...prev, ...added])])
+    onToast(
+      added.length
+        ? `Matched onto ${added.length} other night${added.length === 1 ? '' : 's'}`
+        : 'No matching free seat on the other nights'
+    )
+  }
+
   const saveGuestSeats = async (g) => {
     setSavingGuestSeats(true)
     try {
       const res = await api.setGuestSeats(loadedEventId, g.id, guestSeatSel)
-      setGuestSeatMap(res.seats)
       setGuests(guests.map((x) => (x.id === g.id ? res.guest : x)))
       onToast(
         guestSeatSel.length
@@ -1547,22 +1585,40 @@ export default function InvitesTab({ onToast, eventId }) {
                         <td colSpan={inviteColCount - 1} style={{ paddingTop: 0, paddingBottom: 16 }}>
                           <div style={{ background: 'var(--surface-alt)', borderRadius: 8, padding: '12px 14px' }}>
                             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-                              {g.name}&apos;s seats in {categoryName(g.seating_category_id)} — party of {g.party_size}
-                              , {guestSeatSel.length} selected. Assigning takes seats off sale; deselecting
-                              releases them from {g.name} but keeps them reserved. Their ticket codes update
-                              to show the seat.
+                              {g.name}&apos;s seats — party of {g.party_size}, {guestSeatSel.length} selected
+                              across all nights. Assigning takes seats off sale; deselecting releases them from{' '}
+                              {g.name} but keeps them reserved. Their ticket codes update to show the seat.
                             </div>
-                            {guestSeatMap === null ? (
+                            {seatDays === null ? (
                               <p style={{ fontSize: 13 }}>Loading seats…</p>
-                            ) : guestSeatMap.length === 0 ? (
+                            ) : seatDays.length === 0 ? (
                               <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                                 No seats in this area yet — set up its sections on Tickets &amp; seating first.
                               </p>
                             ) : (
                               <>
+                                {seatDays.length > 1 && (
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                                    {seatDays.map((day, i) => {
+                                      const pickedHere = day.seats.filter((s) => guestSeatSel.includes(s.id)).length
+                                      return (
+                                        <button
+                                          key={day.category_id + (day.date || '')}
+                                          type="button"
+                                          className={`btn btn-small ${activeSeatDay === i ? 'btn-secondary' : 'btn-ghost'}`}
+                                          onClick={() => setActiveSeatDay(i)}
+                                        >
+                                          {day.date ? fmtGuestDay(day.date) : day.category_name}
+                                          {pickedHere > 0 ? ` · ${pickedHere}` : ''}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                )}
                                 {(() => {
+                                  const activeSeats = seatDays[activeSeatDay].seats
                                   const blocks = {}
-                                  for (const seat of guestSeatMap) {
+                                  for (const seat of activeSeats) {
                                     if (seat.is_blocked !== false && seat.block_label && (!seat.guest_id || seat.guest_id === g.id) && seat.status !== 'sold') {
                                       ;(blocks[seat.block_label] = blocks[seat.block_label] || []).push(seat.id)
                                     }
@@ -1590,33 +1646,52 @@ export default function InvitesTab({ onToast, eventId }) {
                                     </div>
                                   )
                                 })()}
-                                {guestSeatGroups(guestSeatMap).map((grp) => (
-                                  <div key={`${grp.section_label}|${grp.row_label}`} style={{ marginBottom: 10 }}>
-                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
-                                      Section {grp.section_label}
-                                      {grp.row_label ? ` · ${grp.row_label}` : ''}
+                                {seatDays[activeSeatDay].seats.length === 0 ? (
+                                  <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No seats set up for this night yet.</p>
+                                ) : (
+                                  guestSeatGroups(seatDays[activeSeatDay].seats).map((grp) => (
+                                    <div key={`${grp.section_label}|${grp.row_label}`} style={{ marginBottom: 10 }}>
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                        Section {grp.section_label}
+                                        {grp.row_label ? ` · ${grp.row_label}` : ''}
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                        {grp.seats.map((s) => {
+                                          const picked = guestSeatSel.includes(s.id)
+                                          return (
+                                            <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                              <button
+                                                type="button"
+                                                style={guestSeatChipStyle(g, s, picked)}
+                                                title={
+                                                  s.guest_id && s.guest_id !== g.id
+                                                    ? `${s.label} — assigned to ${s.guest_name || 'another guest'}`
+                                                    : s.status === 'reserved'
+                                                      ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
+                                                      : `${s.label} — ${s.status}`
+                                                }
+                                                onClick={() => toggleGuestSeat(g, s)}
+                                              >
+                                                {s.seat_number}
+                                              </button>
+                                              {picked && seatDays.length > 1 && (
+                                                <button
+                                                  type="button"
+                                                  className="btn btn-secondary btn-sm"
+                                                  style={{ padding: '2px 6px', fontSize: 10.5 }}
+                                                  title="Find this same seat on every other night and select it there too"
+                                                  onClick={() => matchSeatEveryNight(g, s)}
+                                                >
+                                                  match all nights
+                                                </button>
+                                              )}
+                                            </span>
+                                          )
+                                        })}
+                                      </div>
                                     </div>
-                                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                      {grp.seats.map((s) => (
-                                        <button
-                                          key={s.id}
-                                          type="button"
-                                          style={guestSeatChipStyle(g, s, guestSeatSel.includes(s.id))}
-                                          title={
-                                            s.guest_id && s.guest_id !== g.id
-                                              ? `${s.label} — assigned to ${s.guest_name || 'another guest'}`
-                                              : s.status === 'reserved'
-                                                ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
-                                                : `${s.label} — ${s.status}`
-                                          }
-                                          onClick={() => toggleGuestSeat(g, s)}
-                                        >
-                                          {s.seat_number}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
+                                  ))
+                                )}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                                   <button
                                     className="btn btn-primary btn-sm"
