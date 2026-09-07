@@ -311,22 +311,28 @@ export default function GuestListTab({ onToast, eventId }) {
                     </td>
                     <td>
                       {externalTicketing ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenTicketsId(openTicketsId === g.id ? null : g.id)}
+                          style={{
+                            display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start',
+                            background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit',
+                          }}
+                          title="Show where this guest was placed — seat, row, or section on file"
+                        >
                           <span
                             className={`pill ${g.tickets_sent_at ? 'pill-confirmed' : 'pill-notsent'}`}
-                            title="Set on Invites/Allotments once you've ordered and delivered this guest's tickets on your external platform"
                           >
                             {g.tickets_sent_at ? 'Tickets sent' : 'Tickets not sent'}
                           </span>
                           {agreedTotal(g) > 0 && (
                             <span
                               style={{ fontSize: 11, color: 'var(--text-muted)' }}
-                              title="From this guest's ticket_allotment grant on Invites/Allotments — not a native EventNXT ticket count"
                             >
                               {agreedTotal(g)} agreed{agreedBreakdown(g) ? ` (${agreedBreakdown(g)})` : ''}
                             </span>
                           )}
-                        </div>
+                        </button>
                       ) : tix.length === 0 ? (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {g.visit_date ? `${fmtDay(g.visit_date)} — ` : ''}no codes minted
@@ -358,7 +364,46 @@ export default function GuestListTab({ onToast, eventId }) {
                       </button>
                     </td>
                   </tr>
-                  {openTicketsId === g.id && (
+                  {openTicketsId === g.id && externalTicketing && (
+                    <tr>
+                      <td colSpan={6} style={{ background: 'var(--surface-alt)' }}>
+                        <div style={{ padding: '10px 4px', fontSize: 13 }}>
+                          {(() => {
+                            const full = fullById.get(g.id)
+                            const seats = full?.seat_labels || []
+                            const section = full?.section_label
+                            if (seats.length > 0) {
+                              return (
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  {seats.map((label, i) => (
+                                    <span
+                                      key={i}
+                                      className="mono"
+                                      style={{
+                                        border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px',
+                                        background: 'var(--surface)',
+                                      }}
+                                    >
+                                      {label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )
+                            }
+                            if (section) {
+                              return <div>Section {section}</div>
+                            }
+                            return (
+                              <div style={{ color: 'var(--text-muted)' }}>
+                                No specific seat or section on file for this guest yet.
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {openTicketsId === g.id && !externalTicketing && (
                     <tr>
                       <td colSpan={6} style={{ background: 'var(--surface-alt)' }}>
                         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '10px 4px' }}>
