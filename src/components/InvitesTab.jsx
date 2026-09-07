@@ -489,18 +489,10 @@ export default function InvitesTab({ onToast, eventId }) {
       )
       return
     }
-    if (!window.confirm(`Remove ${guest.name}?`)) return
-    // A seat stays reserved under the guest's name after removal by
-    // default — only ask when they actually had one assigned.
-    const hadSeats = (guest.seat_labels || []).length > 0
-    const releaseSeats = hadSeats
-      ? window.confirm(
-          `${guest.name} had a seat assigned (${guest.seat_labels.join(', ')}). Also release it back to general availability? (Cancel keeps it reserved under their name.)`
-        )
-      : false
+    if (!window.confirm(`Remove ${guest.name}? A seat they held is released back to general availability automatically.`)) return
     try {
-      await api.deleteGuest(loadedEventId, guest.id, releaseSeats)
-      onToast(`${guest.name} removed${releaseSeats ? ' — seat released' : ''}`)
+      await api.deleteGuest(loadedEventId, guest.id)
+      onToast(`${guest.name} removed`)
       loadEventData(loadedEventId)
     } catch (err) {
       onToast(err.message, true)

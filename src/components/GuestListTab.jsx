@@ -35,12 +35,24 @@ export default function GuestListTab({ onToast, eventId }) {
   const [roster, setRoster] = useState(null)
   const [fullGuests, setFullGuests] = useState([])
   const [guestTypes, setGuestTypes] = useState([])
+  const [categories, setCategories] = useState([])
   const [eventSettings, setEventSettings] = useState(null)
   const [search, setSearch] = useState('')
   const [dayFilter, setDayFilter] = useState('')
   const [openTicketsId, setOpenTicketsId] = useState(null)
   const [busyCode, setBusyCode] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  // Manual seat assignment/override (native, seat-grain pools only) —
+  // separate from openTicketsId so the codes panel and the seat picker
+  // can never fight over one guest's expand row. seatDays is ONE ENTRY
+  // PER NIGHT for a multi-day guest (each night is a separate pool
+  // clone with its own Seat rows) so a specific night's seat can be
+  // viewed or moved without touching the others.
+  const [seatsGuestId, setSeatsGuestId] = useState(null)
+  const [seatDays, setSeatDays] = useState(null)
+  const [activeSeatDay, setActiveSeatDay] = useState(0)
+  const [guestSeatSel, setGuestSeatSel] = useState([])
+  const [savingGuestSeats, setSavingGuestSeats] = useState(false)
 
   // Same test Invites/Allotments use: anything other than native means
   // EventNXT never mints codes for these people — the organizer's
@@ -50,16 +62,18 @@ export default function GuestListTab({ onToast, eventId }) {
 
   const load = async (evId) => {
     try {
-      const [r, gt, full, settings] = await Promise.all([
+      const [r, gt, full, settings, cats] = await Promise.all([
         api.getDoorRoster(evId),
         api.listGuestTypes(evId),
         api.listGuests(evId),
         api.getEventSettings(evId).catch(() => null),
+        api.listSeatingCategories(evId).catch(() => []),
       ])
       setRoster(r)
       setGuestTypes(gt)
       setFullGuests(full)
       setEventSettings(settings)
+      setCategories(cats)
       setLoadedEventId(evId)
     } catch (err) {
       onToast(err.message, true)
@@ -105,6 +119,123 @@ export default function GuestListTab({ onToast, eventId }) {
     const rows = [...allotmentRows(g)].sort((a, b) => a.date.localeCompare(b.date))
     if (rows.length <= 1) return null
     return rows.map((r) => `${r.quantity} ${fmtDay(r.date)}`).join(', ')
+  }
+
+  // ---------- Manual seat assignment/override (native, seat-grain) ----------
+  // Both Invites and Allotments say a confirmed guest's seats are
+  // managed "on Guest list" — this is that capability, covering
+  // guests from EITHER origin in one place. Auto-placement now picks a
+  // real seat on confirm, so this is mainly for correcting/overriding
+  // an assignment, not a mandatory step.
+  const catFor = (g) => {
+    const full = fullById.get(g.id)
+    return categories?.find((c) => c.id === full?.seating_category_id) || null
+  }
+  const seatAssignable = (g) => catFor(g)?.sales_grain === 'seat'
+
+  const openGuestSeats = (g) => {
+    setSeatsGuestId(g.id)
+    setSeatDays(null)
+    setActiveSeatDay(0)
+    setGuestSeatSel([])
+    api
+      .getGuestSeatDays(loadedEventId, g.id)
+      .then((days) => {
+        setSeatDays(days)
+        const mine = new Set()
+        days.forEach((d) => d.seats.forEach((s) => { if (s.guest_id === g.id) mine.add(s.id) }))
+        setGuestSeatSel([...mine])
+      })
+      .catch((err) => {
+        onToast(err.message, true)
+        setSeatsGuestId(null)
+      })
+  }
+
+  const guestSeatSelectable = (g, s) => {
+    if (s.guest_id === g.id) return true // theirs — can deselect to release
+    if (s.guest_id) return false // another guest's
+    return s.status === 'available' || s.status === 'reserved'
+  }
+
+  const toggleGuestSeat = (g, s) => {
+    if (!guestSeatSelectable(g, s)) return
+    setGuestSeatSel((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
+  }
+
+  // Convenience for a multi-night guest: take a seat just picked on
+  // ONE night and find the SAME identity (section/row/number) on every
+  // OTHER night already loaded in seatDays — no extra round trip, since
+  // all nights' maps are fetched together by openGuestSeats. Skips a
+  // night where that identity is missing, sold, or someone else's.
+  const matchSeatEveryNight = (g, seat) => {
+    if (!seatDays || seatDays.length <= 1) return
+    const added = []
+    for (const day of seatDays) {
+      const already = day.seats.some((s) => s.id === seat.id)
+      if (already) continue
+      const sib = day.seats.find(
+        (s) =>
+          s.section_label === seat.section_label &&
+          (s.row_label || null) === (seat.row_label || null) &&
+          s.seat_number === seat.seat_number
+      )
+      if (sib && (!sib.guest_id || sib.guest_id === g.id) && sib.status !== 'sold') added.push(sib.id)
+    }
+    setGuestSeatSel((prev) => [...new Set([...prev, ...added])])
+    onToast(
+      added.length
+        ? `Matched onto ${added.length} other night${added.length === 1 ? '' : 's'}`
+        : 'No matching free seat on the other nights'
+    )
+  }
+
+  const saveGuestSeats = async (g) => {
+    setSavingGuestSeats(true)
+    try {
+      await api.setGuestSeats(loadedEventId, g.id, guestSeatSel)
+      onToast(
+        guestSeatSel.length
+          ? `${guestSeatSel.length} seat${guestSeatSel.length === 1 ? '' : 's'} assigned to ${g.name}`
+          : `${g.name}'s seats released — they stay reserved`
+      )
+      setSeatsGuestId(null)
+      load(loadedEventId)
+    } catch (err) {
+      onToast(err.message, true)
+    } finally {
+      setSavingGuestSeats(false)
+    }
+  }
+
+  const guestSeatChipStyle = (g, s, isSelected) => {
+    const base = {
+      minWidth: 34, padding: '6px 4px', borderRadius: 6, fontSize: 12, fontFamily: 'inherit',
+      textAlign: 'center', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
+      cursor: guestSeatSelectable(g, s) ? 'pointer' : 'not-allowed',
+    }
+    if (s.status === 'sold' || s.status === 'held')
+      return { ...base, background: 'var(--surface-alt)', color: 'var(--text-muted)', textDecoration: 'line-through' }
+    if (s.guest_id && s.guest_id !== g.id)
+      return { ...base, background: 'var(--surface-alt)', color: 'var(--text-muted)', border: '1px dashed var(--warning)' }
+    if (isSelected)
+      return { ...base, background: 'var(--accent-dark)', borderColor: 'var(--accent-dark)', color: '#fff', fontWeight: 600 }
+    if (s.status === 'reserved') return { ...base, border: '1px dashed var(--warning)', fontWeight: 600 }
+    return base
+  }
+
+  const guestSeatGroups = (seatList) => {
+    const groups = []
+    const byKey = {}
+    for (const s of seatList) {
+      const key = `${s.section_label}||${s.row_label || ''}`
+      if (!byKey[key]) {
+        byKey[key] = { section_label: s.section_label, row_label: s.row_label, seats: [] }
+        groups.push(byKey[key])
+      }
+      byKey[key].seats.push(s)
+    }
+    return groups
   }
 
   // Allotment HOLDERS (sponsor entities) never appear here — only
@@ -192,7 +323,7 @@ export default function GuestListTab({ onToast, eventId }) {
 
   const removeGuest = async (g) => {
     const note = window.prompt(
-      `Remove ${g.name}? Their codes stop admitting${g.allocation_status === 'confirmed' ? ' and they get a cancellation email' : ''}.\n\nOptional note to include (leave blank for none):`
+      `Remove ${g.name}? Their codes stop admitting${g.allocation_status === 'confirmed' ? ' and they get a cancellation email' : ''}. A seat they held is released back to general availability automatically.\n\nOptional note to include (leave blank for none):`
     )
     if (note === null) return // cancelled the prompt
     try {
@@ -349,6 +480,15 @@ export default function GuestListTab({ onToast, eventId }) {
                       )}
                     </td>
                     <td className="actions-cell">
+                      {!externalTicketing && seatAssignable(g) && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => (seatsGuestId === g.id ? setSeatsGuestId(null) : openGuestSeats(g))}
+                          title="Assign or change this guest's specific seat"
+                        >
+                          Seats
+                        </button>
+                      )}
                       {tix.length > 0 && (
                         <button
                           className="btn btn-secondary btn-sm"
@@ -364,6 +504,107 @@ export default function GuestListTab({ onToast, eventId }) {
                       </button>
                     </td>
                   </tr>
+                  {seatsGuestId === g.id && (
+                    <tr>
+                      <td colSpan={6} style={{ background: 'var(--surface-alt)' }}>
+                        <div style={{ padding: '10px 4px' }}>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+                            {g.name}&apos;s seats — party of {g.party_size || 1}, {guestSeatSel.length} selected
+                            across all nights. Assigning takes seats off sale; deselecting releases them from{' '}
+                            {g.name} but keeps them reserved. Their ticket codes update to show the seat.
+                          </div>
+                          {seatDays === null ? (
+                            <p style={{ fontSize: 13 }}>Loading seats…</p>
+                          ) : seatDays.length === 0 ? (
+                            <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                              No seats in this area yet — set up its sections on Tickets &amp; seating first.
+                            </p>
+                          ) : (
+                            <>
+                              {seatDays.length > 1 && (
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                                  {seatDays.map((day, i) => {
+                                    const pickedHere = day.seats.filter((s) => guestSeatSel.includes(s.id)).length
+                                    return (
+                                      <button
+                                        key={day.category_id + (day.date || '')}
+                                        type="button"
+                                        className={`btn btn-small ${activeSeatDay === i ? 'btn-secondary' : 'btn-ghost'}`}
+                                        onClick={() => setActiveSeatDay(i)}
+                                      >
+                                        {day.date ? fmtDay(day.date) : day.category_name}
+                                        {pickedHere > 0 ? ` · ${pickedHere}` : ''}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                              {seatDays[activeSeatDay].seats.length === 0 ? (
+                                <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                  No seats set up for this night yet.
+                                </p>
+                              ) : (
+                                guestSeatGroups(seatDays[activeSeatDay].seats).map((grp) => (
+                                  <div key={`${grp.section_label}|${grp.row_label}`} style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                      Section {grp.section_label}
+                                      {grp.row_label ? ` · ${grp.row_label}` : ''}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                      {grp.seats.map((s) => {
+                                        const picked = guestSeatSel.includes(s.id)
+                                        return (
+                                          <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                                            <button
+                                              type="button"
+                                              style={guestSeatChipStyle(g, s, picked)}
+                                              title={
+                                                s.guest_id && s.guest_id !== g.id
+                                                  ? `${s.label} — assigned to ${s.guest_name || 'another guest'}`
+                                                  : s.status === 'reserved'
+                                                    ? `${s.label} — reserved${s.block_label ? `: ${s.block_label}` : ''}`
+                                                    : `${s.label} — ${s.status}`
+                                              }
+                                              onClick={() => toggleGuestSeat(g, s)}
+                                            >
+                                              {s.seat_number}
+                                            </button>
+                                            {picked && seatDays.length > 1 && (
+                                              <button
+                                                type="button"
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ padding: '2px 6px', fontSize: 10.5 }}
+                                                title="Find this same seat on every other night and select it there too"
+                                                onClick={() => matchSeatEveryNight(g, s)}
+                                              >
+                                                match all nights
+                                              </button>
+                                            )}
+                                          </span>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  disabled={savingGuestSeats}
+                                  onClick={() => saveGuestSeats(g)}
+                                >
+                                  {savingGuestSeats ? 'Saving…' : 'Save seats'}
+                                </button>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setSeatsGuestId(null)}>
+                                  Cancel
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {openTicketsId === g.id && externalTicketing && (
                     <tr>
                       <td colSpan={6} style={{ background: 'var(--surface-alt)' }}>

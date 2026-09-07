@@ -203,6 +203,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ note: note || null }),
     }),
+  getGuestSeatDays: (eventId, guestId) => request(`/events/${eventId}/guests/${guestId}/seat-days`),
   // Comp ticketing (guest modes)
   sendGuestTicket: (eventId, guestId) =>
     request(`/events/${eventId}/guests/${guestId}/send-ticket`, { method: 'POST' }),
