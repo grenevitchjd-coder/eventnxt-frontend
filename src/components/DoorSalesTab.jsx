@@ -51,6 +51,9 @@ export default function DoorSalesTab({ onToast, eventId }) {
   const [submitting, setSubmitting] = useState(false)
   const [saleResult, setSaleResult] = useState(null)
   const [reconciliation, setReconciliation] = useState(null)
+  // 'passes' (All days) | an ISO day | null until the catalog decides a
+  // default — same chip vocabulary as the public ticket page.
+  const [dayFilter, setDayFilter] = useState(null)
 
   const load = async (evId) => {
     try {
@@ -92,6 +95,31 @@ export default function DoorSalesTab({ onToast, eventId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId])
 
+  // The device's own local date, YYYY-MM-DD — same format as a ticket
+  // type's valid_date, so it compares directly against event days.
+  const todayIso = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  // Default chip once the catalog arrives: on a night of the event,
+  // default straight to tonight's tickets (that's what a walk-up sale
+  // almost always is); otherwise the same "All days if passes exist,
+  // else the first night" default the public page uses.
+  useEffect(() => {
+    if (!Array.isArray(catalog) || dayFilter !== null) return
+    const dated = catalog.some((t) => t.valid_date)
+    if (!dated) return
+    const days = [...new Set(catalog.map((t) => t.valid_date).filter(Boolean))].sort()
+    if (days.includes(todayIso)) {
+      setDayFilter(todayIso)
+    } else {
+      const undated = catalog.some((t) => !t.valid_date)
+      setDayFilter(undated ? 'passes' : days[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog, dayFilter])
+
   useEffect(() => {
     const code = buyer.promo.trim()
     if (!code || !loadedEventId) {
@@ -110,8 +138,32 @@ export default function DoorSalesTab({ onToast, eventId }) {
   const isSectionedPass = (t) => (t.pass_nights || []).length > 0
   const sellable = (catalog || []).filter((t) => !isSectionedPass(t))
 
+  // Same day-chip categorization as the public ticket page: "All days"
+  // shows the undated/pass products, one chip per event night. The
+  // door-specific twist — locked when it's actually a night of the
+  // event: only "All days" and TONIGHT are selectable, so staff can't
+  // accidentally sell Thursday's tickets on Saturday. Off a show night
+  // (before/after the run, or testing ahead of time), every day stays
+  // pickable, same as the buyer page.
+  const anyUndated = sellable.some((t) => !t.valid_date)
+  const eventDays = [...new Set(sellable.map((t) => t.valid_date).filter(Boolean))].sort()
+  const anyDated = eventDays.length > 0
+  const isEventDayToday = eventDays.includes(todayIso)
+  const availableDays = isEventDayToday ? eventDays.filter((d) => d === todayIso) : eventDays
+  const dayLabel = (iso) =>
+    new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })
   const chosenSection = (t) => (t.sections || []).find((x) => x.id === sectionChoice[t.id]) || null
   const qtyFor = (t) => (t.assigned_seating ? (seatPicks[t.id] || []).length : quantities[t.id] || 0)
+
+  const visibleTypes =
+    dayFilter === null
+      ? sellable
+      : dayFilter === 'passes'
+        ? sellable.filter((t) => !t.valid_date)
+        : sellable.filter((t) => t.valid_date === dayFilter)
+  const hiddenSelectedCount = sellable
+    .filter((t) => !visibleTypes.includes(t))
+    .reduce((sum, t) => sum + qtyFor(t), 0)
 
   const unitCap = (t) => {
     let cap = Math.min(t.max_per_order, t.available)
@@ -271,11 +323,48 @@ export default function DoorSalesTab({ onToast, eventId }) {
         </p>
       )}
 
-      {sellable.length === 0 ? (
-        <div className="empty-state">Nothing sellable for this event yet.</div>
+      {anyDated && (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 6px' }}>
+            {anyUndated && (
+              <button
+                className={`btn btn-small ${dayFilter === 'passes' ? 'btn-secondary' : 'btn-ghost'}`}
+                onClick={() => setDayFilter('passes')}
+              >
+                All days
+              </button>
+            )}
+            {availableDays.map((d) => (
+              <button
+                key={d}
+                className={`btn btn-small ${dayFilter === d ? 'btn-secondary' : 'btn-ghost'}`}
+                onClick={() => setDayFilter(d)}
+              >
+                {dayLabel(d)}
+                {d === todayIso ? ' · tonight' : ''}
+              </button>
+            ))}
+          </div>
+          {isEventDayToday && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+              It's a night of this event — locked to tonight's tickets and All-days passes so the wrong night can't
+              get sold by mistake.
+            </p>
+          )}
+          {hiddenSelectedCount > 0 && (
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+              Also in this sale: {hiddenSelectedCount} ticket{hiddenSelectedCount === 1 ? '' : 's'} picked under
+              another day — the total below includes everything.
+            </p>
+          )}
+        </>
+      )}
+
+      {visibleTypes.length === 0 ? (
+        <div className="empty-state">Nothing sellable for this day yet.</div>
       ) : (
         <div className="ticket-picker">
-          {sellable.map((t) => {
+          {visibleTypes.map((t) => {
             const qty = quantities[t.id] || 0
             const cap = unitCap(t)
             return (
