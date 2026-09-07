@@ -35,18 +35,31 @@ export default function GuestListTab({ onToast, eventId }) {
   const [roster, setRoster] = useState(null)
   const [fullGuests, setFullGuests] = useState([])
   const [guestTypes, setGuestTypes] = useState([])
+  const [eventSettings, setEventSettings] = useState(null)
   const [search, setSearch] = useState('')
   const [dayFilter, setDayFilter] = useState('')
   const [openTicketsId, setOpenTicketsId] = useState(null)
   const [busyCode, setBusyCode] = useState(null)
   const [busyId, setBusyId] = useState(null)
 
+  // Same test Invites/Allotments use: anything other than native means
+  // EventNXT never mints codes for these people — the organizer's
+  // manual "tickets sent" stamp (set on Invites/Allotments) is the only
+  // ticket-status signal that exists for them here.
+  const externalTicketing = !!eventSettings && eventSettings.ticketing_mode !== 'native'
+
   const load = async (evId) => {
     try {
-      const [r, gt, full] = await Promise.all([api.getDoorRoster(evId), api.listGuestTypes(evId), api.listGuests(evId)])
+      const [r, gt, full, settings] = await Promise.all([
+        api.getDoorRoster(evId),
+        api.listGuestTypes(evId),
+        api.listGuests(evId),
+        api.getEventSettings(evId).catch(() => null),
+      ])
       setRoster(r)
       setGuestTypes(gt)
       setFullGuests(full)
+      setEventSettings(settings)
       setLoadedEventId(evId)
     } catch (err) {
       onToast(err.message, true)
@@ -267,12 +280,16 @@ export default function GuestListTab({ onToast, eventId }) {
                       {g.rsvp_confirmed && (
                         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>RSVP: {g.rsvp_confirmed}</div>
                       )}
-                      {g.tickets_sent_at && (
-                        <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 2 }}>tickets sent ✓</div>
-                      )}
                     </td>
                     <td>
-                      {tix.length === 0 ? (
+                      {externalTicketing ? (
+                        <span
+                          className={`pill ${g.tickets_sent_at ? 'pill-confirmed' : 'pill-notsent'}`}
+                          title="Set on Invites/Allotments once you've ordered and delivered this guest's tickets on your external platform"
+                        >
+                          {g.tickets_sent_at ? 'Tickets sent' : 'Tickets not sent'}
+                        </span>
+                      ) : tix.length === 0 ? (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {g.visit_date ? `${fmtDay(g.visit_date)} — ` : ''}no codes minted
                         </span>
