@@ -613,6 +613,7 @@ export default function GuestListTab({ onToast, eventId }) {
                             const full = fullById.get(g.id)
                             const seats = full?.seat_labels || []
                             const section = full?.section_label
+                            const cat = catFor(g)
                             if (seats.length > 0) {
                               return (
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -632,7 +633,17 @@ export default function GuestListTab({ onToast, eventId }) {
                               )
                             }
                             if (section) {
-                              return <div>Section {section}</div>
+                              const word = (cat && cat.unit_label) || 'Section'
+                              const row = cat && cat.row_label
+                              return <div>{row ? `${row} · ` : ''}{word} {section}</div>
+                            }
+                            // An area was picked but no specific section/seat —
+                            // this is the SAME thing a sent ticket would show
+                            // for this guest (the area's own name), so an
+                            // external guest reads the same as a native one
+                            // instead of a dead-end "nothing on file" message.
+                            if (cat) {
+                              return <div>{cat.name}</div>
                             }
                             return (
                               <div style={{ color: 'var(--text-muted)' }}>
