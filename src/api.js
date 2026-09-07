@@ -362,4 +362,14 @@ export const api = {
   refundOrder: (eventId, orderId) =>
     request(`/events/${eventId}/orders/${orderId}/refund`, { method: 'POST' }),
 
+  // Door sales (cash, in-person) — 0053
+  getDoorSalesCatalog: (eventId) => request(`/events/${eventId}/door-sales/catalog`),
+  getDoorSalesSeatMap: (eventId, ticketTypeId) =>
+    request(`/events/${eventId}/door-sales/ticket-types/${ticketTypeId}/seats`),
+  checkDoorSalesPromoCode: (eventId, code) =>
+    request(`/events/${eventId}/door-sales/promo-codes/${encodeURIComponent(code)}`),
+  sellAtDoor: (eventId, payload) =>
+    request(`/events/${eventId}/door-sales/sell`, { method: 'POST', body: JSON.stringify(payload) }),
+  getDoorSalesReconciliation: (eventId, start, end) =>
+    request(`/events/${eventId}/door-sales/reconciliation?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`),
 }

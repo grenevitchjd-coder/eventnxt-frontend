@@ -38,6 +38,7 @@ import EventSettingsTab from '../components/EventSettingsTab'
 import TicketsSeatingTab from '../components/TicketsSeatingTab'
 import EventWorkspaceTab from '../components/EventWorkspaceTab'
 import GuestListTab from '../components/GuestListTab'
+import DoorSalesTab from '../components/DoorSalesTab'
 import InvitesTab from '../components/InvitesTab'
 import AllotmentsTab from '../components/AllotmentsTab'
 import PromosTab from '../components/PromosTab'
@@ -86,6 +87,7 @@ const NAV_GROUPS = [
       { key: 'invites', label: 'Invites' },
       { key: 'allotments', label: 'Allotments' },
       { key: 'guests', label: 'Guest list' },
+      { key: 'door-sales', label: 'Door sales' },
       { key: 'seating-summary', label: 'Seating summary' },
     ],
   },
@@ -107,6 +109,7 @@ const TAB_AREAS = {
   invites: 'guests',
   allotments: 'guests',
   guests: 'guest_list',
+  'door-sales': 'guest_list',
 }
 
 // A view OR manage grant on the area makes its pages visible; writes are
@@ -295,6 +298,8 @@ export default function Dashboard() {
         return <AllotmentsTab key={eventId} {...props} />
       case 'guests':
         return <GuestListTab key={eventId} {...props} />
+      case 'door-sales':
+        return <DoorSalesTab key={eventId} {...props} />
       case 'promos':
         return <PromosTab key={eventId} {...props} />
       case 'promo-tracking':
