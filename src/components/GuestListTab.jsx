@@ -75,9 +75,37 @@ export default function GuestListTab({ onToast, eventId }) {
   const fmtDay = (iso) =>
     iso ? new Date(iso + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : null
 
-  const dayOptions = roster
-    ? [...new Set(roster.flatMap((g) => [g.visit_date, ...(g.tickets || []).map((t) => t.valid_date)]).filter(Boolean))].sort()
-    : []
+  // Day info for a guest can come from three places depending on how
+  // they're ticketed: their own visit_date (single-day/choose-mode),
+  // minted native ticket codes (native events), or their per-day
+  // ticket_allotment grant rows (the ONLY source for external-ticketing
+  // guests, since EventNXT never mints codes for them). Without this
+  // last source the day filter silently had nothing to show for any
+  // multi-day external event.
+  const fullById = new Map(fullGuests.map((g) => [g.id, g]))
+  const allotmentDays = (g) => (fullById.get(g.id)?.ticket_allotment || []).map((r) => r.date)
+  const guestDays = (g) => [g.visit_date, ...(g.tickets || []).map((t) => t.valid_date), ...allotmentDays(g)].filter(Boolean)
+
+  const dayOptions = roster ? [...new Set(roster.flatMap(guestDays))].sort() : []
+
+  // What was actually AGREED for this guest, from their ticket_allotment
+  // grant rows (Invites/Allotments) — the only record of it for
+  // external-ticketing guests, since no native tickets ever mint to
+  // count instead. spend_total is an across-days CAP (chooser mode):
+  // when it's set lower than the sum of day rows, the agreed total is
+  // the cap, not the (larger) sum of grants.
+  const allotmentRows = (g) => (fullById.get(g.id)?.ticket_allotment || []).filter((r) => r.quantity > 0)
+  const agreedTotal = (g) => {
+    const full = fullById.get(g.id)
+    const dayTotal = allotmentRows(g).reduce((sum, r) => sum + r.quantity, 0)
+    const cap = full?.spend_total
+    return cap != null && cap < dayTotal ? cap : dayTotal
+  }
+  const agreedBreakdown = (g) => {
+    const rows = [...allotmentRows(g)].sort((a, b) => a.date.localeCompare(b.date))
+    if (rows.length <= 1) return null
+    return rows.map((r) => `${r.quantity} ${fmtDay(r.date)}`).join(', ')
+  }
 
   // Allotment HOLDERS (sponsor entities) never appear here — only
   // ticket-receiving people. A holder is anyone some row points at via
@@ -89,7 +117,7 @@ export default function GuestListTab({ onToast, eventId }) {
 
   const visible = (roster || []).filter((g) => {
     if (holderIds.has(g.id)) return false
-    if (dayFilter && g.visit_date !== dayFilter && !(g.tickets || []).some((t) => t.valid_date === dayFilter)) return false
+    if (dayFilter && !guestDays(g).includes(dayFilter)) return false
     if (search) {
       const q = search.toLowerCase()
       if (!g.name.toLowerCase().includes(q) && !g.email.toLowerCase().includes(q)) return false
@@ -283,12 +311,22 @@ export default function GuestListTab({ onToast, eventId }) {
                     </td>
                     <td>
                       {externalTicketing ? (
-                        <span
-                          className={`pill ${g.tickets_sent_at ? 'pill-confirmed' : 'pill-notsent'}`}
-                          title="Set on Invites/Allotments once you've ordered and delivered this guest's tickets on your external platform"
-                        >
-                          {g.tickets_sent_at ? 'Tickets sent' : 'Tickets not sent'}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                          <span
+                            className={`pill ${g.tickets_sent_at ? 'pill-confirmed' : 'pill-notsent'}`}
+                            title="Set on Invites/Allotments once you've ordered and delivered this guest's tickets on your external platform"
+                          >
+                            {g.tickets_sent_at ? 'Tickets sent' : 'Tickets not sent'}
+                          </span>
+                          {agreedTotal(g) > 0 && (
+                            <span
+                              style={{ fontSize: 11, color: 'var(--text-muted)' }}
+                              title="From this guest's ticket_allotment grant on Invites/Allotments — not a native EventNXT ticket count"
+                            >
+                              {agreedTotal(g)} agreed{agreedBreakdown(g) ? ` (${agreedBreakdown(g)})` : ''}
+                            </span>
+                          )}
+                        </div>
                       ) : tix.length === 0 ? (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {g.visit_date ? `${fmtDay(g.visit_date)} — ` : ''}no codes minted
